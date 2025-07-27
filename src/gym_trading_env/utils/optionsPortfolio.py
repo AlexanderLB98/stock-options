@@ -31,8 +31,10 @@ class OptionsPortfolio:
         """
         if 0 <= index < self.max_options and self.owned_options[index] is not None:
             option = self.owned_options[index]
-            # self.cash += price
+
+            self.cash += option.value  # Assuming value is updated before selling
             print(f"Sold option: {option}")
+            print(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
             self.owned_options[index] = None
             return True
         print(f"No option to sell at slot {index}.")
@@ -76,31 +78,20 @@ class OptionsPortfolio:
     def valorisation(self, current_price, current_date):
         """
         Returns the total portfolio value: cash + sum of current option valuations.
-        option_valuations: list or dict mapping each owned option slot to its current value.
-        If not provided, assumes options are worth zero.
+        Sells (removes) options that have expired.
         """
         value = self.cash
-        for opt in self.owned_options:
-            print(f"Evaluating option: {opt}")
-            option_value = opt.evaluate_option(current_price, current_date) if opt is not None else 0
-            print(f"Option value: {option_value}")
-            value += option_value
+        for i, opt in enumerate(self.owned_options):
+            if opt is not None:
+                # Update days to expire
+                opt.days_to_expire = (opt.expiry_date - current_date).days
+                if opt.days_to_expire <= 0:
+                    print(f"Option {opt} has expired. Selling at current value.")
+                    self.sell_option(i)  # This will add option.value to cash and remove the option
+                    continue  # Skip further evaluation for this slot
+                print(f"Evaluating option: {opt}")
+                option_value = opt.evaluate_option(current_price, current_date)
+                print(f"Option value: {option_value}")
+                value += option_value
         print(f"Total portfolio value: {value}")
         return value
-
-
-       #  option_valuations = None # STILL HAVE TO FIX THIS
-       #  for i in len(self.owned_options):
-       #      if self.owned_options[i] is None:
-       #          option_valuations[i] = 0
-       #      else:
-       #          option_valuations[i] = self.owned_options[i].evaluate_option(current_price, current_date)
-       #  value = self.cash
-       #  for i, opt in enumerate(self.owned_options):
-       #      if opt is not None:
-       #          # If option_valuations is a dict, use opt as key; if list, use index
-       #          if isinstance(option_valuations, dict):
-       #              value += option_valuations.get(opt, 0)
-       #          else:
-       #              value += option_valuations[i]
-       #  return value

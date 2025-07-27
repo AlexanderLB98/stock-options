@@ -42,14 +42,17 @@ class Option:
         Evaluate the option's value based on the current price.
         This is a placeholder for actual valuation logic.
         """
-        days_to_expire = (self.expiry_date - current_date).days
+        self.days_to_expire = (self.expiry_date - current_date).days
+        if self.days_to_expire <= 0:
+            """ Option has expired, return its intrinsic value. IMPLEMENT"""
+            pass
         if self.option_type == "call":
             # call_value = blackScholesCall(current_price, self.strike, days_to_expire / 365.0, self.r, self.sigma, self.q)
-            self.value = blackScholesCall(current_price, self.strike, days_to_expire / 365.0, self.r, self.sigma, self.q)
+            self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
             return self.value 
         elif self.option_type == "put":
             # put_value = blackScholesPut(current_price, self.strike, days_to_expire / 365.0, self.r, self.sigma, self.q)
-            self.value = blackScholesPut(current_price, self.strike, days_to_expire / 365.0, self.r, self.sigma, self.q)
+            self.value = blackScholesPut(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
             return self.value
 
 def define_action_space(env: gym.Env) -> spaces.Discrete:

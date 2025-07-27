@@ -268,6 +268,8 @@ class TradingEnv(gym.Env):
         }
     
     def step(self, action):
+        print("-------------------------------------------------------------------")
+        print(f"Step {self._step} at date {self.current_date} with action {action}")
         self._idx += 1
         self._step += 1
 
