@@ -24,7 +24,9 @@ dependencies = [
   "flask>=2.2.3", 
   "pyecharts>=2.0.2", 
   "ccxt==3.0.59", 
-  "nest_asyncio"
+  "nest_asyncio", 
+  "stable-baselines3 (>=2.7.0,<3.0.0)", 
+  "tensorboard (>=2.20.0,<3.0.0)"
 ]
 
 [project.urls]

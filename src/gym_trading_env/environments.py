@@ -139,7 +139,7 @@ class TradingEnv(gym.Env):
         self.observation_space = spaces.Box(
             -np.inf,
             np.inf,
-            shape = [self._nb_features]
+            shape = [self._nb_features + self.n_options * 4, ]  # 4 features for each option (type, strike, premium, days_to_expiry)
         )
         if self.windows is not None:
             self.observation_space = spaces.Box(
@@ -392,6 +392,12 @@ class TradingEnv(gym.Env):
         if done or truncated:
             self.calculate_metrics()
             self.log()
+
+        obs = self._get_obs()
+        # Validación
+        assert not (np.isnan(obs).any() or np.isinf(obs).any()), f"Invalid obs: {obs}"
+        assert not np.isnan(reward), f"Invalid reward: {reward}"
+
         return self._get_obs(),  self.historical_info["reward", -1], done, truncated, self.historical_info[-1]
 
     def add_metric(self, name, function):

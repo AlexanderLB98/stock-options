@@ -8,6 +8,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 from gym_trading_env.environments import TradingEnv
 from gym_trading_env.options import define_action_space
 
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
+
+
 def load_data(csv_path):
     """Carga los datos de precios desde un CSV."""
     df = pd.read_csv(csv_path, parse_dates=["date"], index_col= "date")
@@ -15,7 +19,7 @@ def load_data(csv_path):
     df = df[-1000:]
 
     # Create the feature : ( close[t] - close[t-1] )/ close[t-1]
-    df["feature_close"] = df["close"].pct_change()
+    df["feature_close"] = df["close"].pct_change().fillna(0)
      
     # Create the feature : open[t] / close[t]
     df["feature_open"] = df["open"]/df["close"]
@@ -53,14 +57,17 @@ def run_random_episode(env, max_steps=50):
     print(f"Episodio terminado en {step} pasos. Última recompensa: {reward}")
 
 def run(env):
+    # Create the PPO model
+    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cpu")
     # Run an episode until it ends :
     done, truncated = False, False
     observation, info = env.reset()
     while not done and not truncated:
         # Pick a position by its index in your position list (=[-1, 0, 1])....usually something like : position_index = your_policy(observation)
-        action = env.action_space.sample() 
+        # action = env.action_space.sample() 
+        action, _state = model.predict(observation, deterministic=True)
         observation, reward, done, truncated, info = env.step(action)
-        print(f"Observation: {observation}")
+        print(f"Observation: {observation}, action: {action}, reward: {reward}")
         # print(position_index)
         # To render
         if done:

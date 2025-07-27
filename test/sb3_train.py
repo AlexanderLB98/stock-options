@@ -8,6 +8,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 from gym_trading_env.environments import TradingEnv
 from gym_trading_env.options import define_action_space
 
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
+
+
 def load_data(csv_path):
     """Carga los datos de precios desde un CSV."""
     df = pd.read_csv(csv_path, parse_dates=["date"], index_col= "date")
@@ -15,7 +19,7 @@ def load_data(csv_path):
     df = df[-1000:]
 
     # Create the feature : ( close[t] - close[t-1] )/ close[t-1]
-    df["feature_close"] = df["close"].pct_change()
+    df["feature_close"] = df["close"].pct_change().fillna(0)
      
     # Create the feature : open[t] / close[t]
     df["feature_open"] = df["open"]/df["close"]
@@ -72,11 +76,20 @@ def main():
     csv_path = "data/PHIA.csv"
     df = load_data(csv_path)
     env = create_env(df)
-
+    # run(env)
     obs, info = env.reset()
     print("Initial observation:", obs)
-    run(env)
+    
+    # Create the PPO model
+    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cpu")
+
+    # Train the model
+    model.learn(total_timesteps=100_000)
+
+    # Save the model
+    model.save("ppo_trading_model")
+
+    print("✅ Training finished and model saved.")
 
 if __name__ == "__main__":
     main()
-
