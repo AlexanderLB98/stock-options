@@ -183,7 +183,29 @@ class TradingEnv(gym.Env):
             _step_index = self._idx
         else: 
             _step_index = np.arange(self._idx + 1 - self.windows , self._idx + 1)
-        return self._obs_array[_step_index]
+
+
+        base_obs = self._obs_array[_step_index]
+
+        # Opciones disponibles
+        option_features = 4  # type, strike, premium, days_to_expiry
+        options_obs = np.zeros((self.n_options, option_features), dtype=np.float32)
+
+        for i, row in enumerate(self.options.iter_rows(named=True)):
+            if i >= self.n_options:
+                break
+            option_type = 1.0 if row["type"] == "call" else 0.0
+            strike = float(row["strike"])
+            premium = float(row["premium"])
+            dte = int(row["days_to_expiry"])
+            options_obs[i] = [option_type, strike, premium, dte]
+
+        options_flat = options_obs.flatten()
+
+        # Concatenar mercado + opciones
+        full_obs = np.concatenate([base_obs, options_flat])
+
+        return full_obs
 
     
     def reset(self, seed = None, options=None, **kwargs):

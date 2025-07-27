@@ -60,6 +60,7 @@ def run(env):
         # Pick a position by its index in your position list (=[-1, 0, 1])....usually something like : position_index = your_policy(observation)
         action = env.action_space.sample() 
         observation, reward, done, truncated, info = env.step(action)
+        print(f"Observation: {observation}")
         # print(position_index)
         # To render
         if done:
