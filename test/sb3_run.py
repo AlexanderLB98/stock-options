@@ -58,7 +58,10 @@ def run_random_episode(env, max_steps=50):
 
 def run(env):
     # Create the PPO model
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cpu")
+    # model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cpu")
+    model_path = "ppo_trading_model"
+    model = PPO.load(model_path, device="cpu", env=env)
+
     # Run an episode until it ends :
     done, truncated = False, False
     observation, info = env.reset()
@@ -67,7 +70,7 @@ def run(env):
         # action = env.action_space.sample() 
         action, _state = model.predict(observation, deterministic=True)
         observation, reward, done, truncated, info = env.step(action)
-        print(f"Observation: {observation}, action: {action}, reward: {reward}")
+        # print(f"Observation: {observation}, action: {action}, reward: {reward}")
         # print(position_index)
         # To render
         if done:

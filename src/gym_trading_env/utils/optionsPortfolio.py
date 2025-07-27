@@ -1,4 +1,4 @@
-# from options import Option
+RENDER = False
 
 class OptionsPortfolio:
     """
@@ -14,15 +14,18 @@ class OptionsPortfolio:
         Buy an option if there is space and enough cash.
         """
         if self.cash < option.premium:
-            print("Not enough cash to buy option.")
+            if RENDER:
+                print("Not enough cash to buy option.")
             return False
         for i in range(self.max_options):
             if self.owned_options[i] is None:
                 self.owned_options[i] = option
                 self.cash -= option.premium
-                print(f"Bought option: {option}")
+                if RENDER:
+                    print(f"Bought option: {option}")
                 return True
-        print("No slot available to buy more options.")
+        if RENDER:
+            print("No slot available to buy more options.")
         return False
 
     def sell_option(self, index):
@@ -33,11 +36,13 @@ class OptionsPortfolio:
             option = self.owned_options[index]
 
             self.cash += option.value  # Assuming value is updated before selling
-            print(f"Sold option: {option}")
-            print(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
+            if RENDER:
+                print(f"Sold option: {option}")
+                print(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
             self.owned_options[index] = None
             return True
-        print(f"No option to sell at slot {index}.")
+        if RENDER:
+            print(f"No option to sell at slot {index}.")
         return False
 
     def get_portfolio_value(self, option_valuations):
@@ -86,12 +91,15 @@ class OptionsPortfolio:
                 # Update days to expire
                 opt.days_to_expire = (opt.expiry_date - current_date).days
                 if opt.days_to_expire <= 0:
-                    print(f"Option {opt} has expired. Selling at current value.")
+                    if RENDER:
+                        print(f"Option {opt} has expired. Selling at current value.")
                     self.sell_option(i)  # This will add option.value to cash and remove the option
                     continue  # Skip further evaluation for this slot
-                print(f"Evaluating option: {opt}")
                 option_value = opt.evaluate_option(current_price, current_date)
-                print(f"Option value: {option_value}")
                 value += option_value
-        print(f"Total portfolio value: {value}")
+                if RENDER:
+                    print(f"Evaluating option: {opt}")
+                    print(f"Option value: {option_value}")
+        if RENDER:
+            print(f"Total portfolio value: {value}")
         return value

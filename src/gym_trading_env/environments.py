@@ -23,6 +23,7 @@ import tempfile, os
 import warnings
 warnings.filterwarnings("error")
 
+RENDER = False
 # MAX_OPTIONS = 10  # max options you can own at once
 
 def basic_reward_function(history : History):
@@ -290,8 +291,9 @@ class TradingEnv(gym.Env):
         }
     
     def step(self, action):
-        print("-------------------------------------------------------------------")
-        print(f"Step {self._step} at date {self.current_date} with action {action}")
+        if RENDER:
+            print("-------------------------------------------------------------------")
+            print(f"Step {self._step} at date {self.current_date} with action {action}")
         self._idx += 1
         self._step += 1
 
@@ -299,14 +301,16 @@ class TradingEnv(gym.Env):
         if action < 0 or action >= self.action_space.n:
             raise ValueError(f"Action {action} is out of bounds for action space with size {self.action_space.n}")
         if action < self.n_options and not self.options.is_empty():
-            print(f"Buying option at action {action} with details: {self.options[action]}")
+            if RENDER:
+                print(f"Buying option at action {action} with details: {self.options[action]}")
             # Buy corresponding option
             option = Option.from_dict(self.options[action].to_dict())
             self._portfolio.buy_option(option)
             # self.owned_options.append(self.options[action].to_dict())
             # self.n_owned_options += 1
         elif action < self.n_options + self.MAX_OPTIONS:
-            print(f"Selling owned option at action {action}")
+            if RENDER:
+                print(f"Selling owned option at action {action}")
             # Sell owned option
             option_index = action - self.n_options # len(self.options)
             # if option_index < 0 or option_index >= self.n_owned_options:
@@ -318,7 +322,7 @@ class TradingEnv(gym.Env):
             #     # self._portfolio.sell_option(option_index)
             self._portfolio.sell_option(option_index)
 
-        print(self.current_date, action)
+        # print(self.current_date, action)
         # print("Current options owned:", self.owned_options)
 
         # self._take_action_order_limit()
