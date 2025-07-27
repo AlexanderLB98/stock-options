@@ -11,13 +11,21 @@ authors = [
 ]
 description = "A simple, easy, customizable Open IA Gym environments for trading."
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.12"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-dependencies = ["pandas>=1.5.3", "numpy>=1.21.1", "gymnasium>=0.28.1", "flask>=2.2.3", "pyecharts>=2.0.2", "ccxt==3.0.59", "nest_asyncio"]
+dependencies = [
+  "pandas>=1.5.3", 
+  "numpy>=1.21.1", 
+  "gymnasium>=0.28.1", 
+  "flask>=2.2.3", 
+  "pyecharts>=2.0.2", 
+  "ccxt==3.0.59", 
+  "nest_asyncio"
+]
 
 [project.urls]
 "Homepage" = "https://github.com/ClementPerroud/Gym-Trading-Env"

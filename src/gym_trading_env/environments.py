@@ -14,9 +14,10 @@ from .utils.portfolio import Portfolio, TargetPortfolio
 from .utils.optionsPortfolio import OptionsPortfolio
 
 from .blackScholes import gen_option_for_date
-from .options import define_action_space
+# from src.options import define_action_space, Option
+from .options import define_action_space, Option
 
-from datetime import datetime, date
+# from datetime import datetime, date
 
 import tempfile, os
 import warnings
@@ -274,26 +275,24 @@ class TradingEnv(gym.Env):
         if action < 0 or action >= self.action_space.n:
             raise ValueError(f"Action {action} is out of bounds for action space with size {self.action_space.n}")
         if action < self.n_options and not self.options.is_empty():
+            print(f"Buying option at action {action} with details: {self.options[action]}")
             # Buy corresponding option
-            # Include check if already have max options owned
-            if self.n_owned_options >= self.MAX_OPTIONS:
-                # raise ValueError(f"Cannot buy option {action}, already own max options ({self.MAX_OPTIONS}).")
-                print(f"Cannot buy option {action}, already own max options ({self.MAX_OPTIONS}).")
-            else: 
-                print(f"Buying option {action} with details: {self.options[action]}")
-
-                # self.owned_options.append(self.options[action].to_dict())
-                # self.n_owned_options += 1
+            option = Option.from_dict(self.options[action].to_dict())
+            self._portfolio.buy_option(option)
+            # self.owned_options.append(self.options[action].to_dict())
+            # self.n_owned_options += 1
         elif action < self.n_options + self.MAX_OPTIONS:
+            print(f"Selling owned option at action {action}")
             # Sell owned option
-            option_index = action - len(self.options)
-            if option_index < 0 or option_index >= self.n_owned_options:
-                print(f"Cannot sell option {option_index}, not owned or out of bounds.")
-                # Check if the option is owned
-            else:
-                print(f"Selling owned option {option_index} with details: {self.owned_options[option_index]}")
-                self.n_owned_options -= 1
-                # self._portfolio.sell_option(option_index)
+            option_index = action - self.n_options # len(self.options)
+            # if option_index < 0 or option_index >= self.n_owned_options:
+            #     print(f"Cannot sell option {option_index}, not owned or out of bounds.")
+            #     # Check if the option is owned
+            # else:
+            #     print(f"Selling owned option {option_index} with details: {self.owned_options[option_index]}")
+            #     self.n_owned_options -= 1
+            #     # self._portfolio.sell_option(option_index)
+            self._portfolio.sell_option(option_index)
 
         print(self.current_date, action)
         # print("Current options owned:", self.owned_options)
@@ -301,7 +300,7 @@ class TradingEnv(gym.Env):
         # self._take_action_order_limit()
         price = self._get_price()
         # self._portfolio.update_interest(borrow_interest_rate= self.borrow_interest_rate)
-        portfolio_value = self._portfolio.valorisation(price)
+        portfolio_value = self._portfolio.valorisation(price, self.current_date)
         portfolio_distribution = self._portfolio.get_portfolio_distribution()
 
         done, truncated = False, False
