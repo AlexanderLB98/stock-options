@@ -16,7 +16,7 @@ def load_data(csv_path):
     """Carga los datos de precios desde un CSV."""
     df = pd.read_csv(csv_path, parse_dates=["date"], index_col= "date")
     print(len(df), "rows loaded from", csv_path)
-    df = df[-1000:]
+    df = df[-5000:]
 
     # Create the feature : ( close[t] - close[t-1] )/ close[t-1]
     df["feature_close"] = df["close"].pct_change().fillna(0)
@@ -73,10 +73,9 @@ def run(env):
         # print(f"Observation: {observation}, action: {action}, reward: {reward}")
         # print(position_index)
         # To render
-        if done:
-            print(env.options)
-            # At the end of the episode you want to render
-            env.save_for_render(dir = "render_logs")
+    print(env.options)
+    # At the end of the episode you want to render
+    env.save_for_render(dir = "render_logs")
 
 def main():
     csv_path = "data/PHIA.csv"

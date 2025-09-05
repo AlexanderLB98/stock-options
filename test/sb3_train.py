@@ -84,10 +84,10 @@ def main():
     model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cpu")
 
     # Train the model
-    model.learn(total_timesteps=100_000)
+    model.learn(total_timesteps=100_000_000)
 
     # Save the model
-    model.save("ppo_trading_model")
+    model.save("ppo_trading_model_100_000_000")
 
     print("✅ Training finished and model saved.")
 

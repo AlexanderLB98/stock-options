@@ -63,10 +63,10 @@ def run(env):
         print(f"Observation: {observation}")
         # print(position_index)
         # To render
-        if done:
-            print(env.options)
-            # At the end of the episode you want to render
-            env.save_for_render(dir = "render_logs")
+    #     if done:
+    print(env.options)
+    # At the end of the episode you want to render
+    env.save_for_render(dir = "render_logs")
 
 def main():
     csv_path = "data/PHIA.csv"

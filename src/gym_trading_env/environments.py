@@ -306,6 +306,7 @@ class TradingEnv(gym.Env):
             # Buy corresponding option
             option = Option.from_dict(self.options[action].to_dict())
             self._portfolio.buy_option(option)
+            self.positions = 1
             # self.owned_options.append(self.options[action].to_dict())
             # self.n_owned_options += 1
         elif action < self.n_options + self.MAX_OPTIONS:
@@ -321,6 +322,7 @@ class TradingEnv(gym.Env):
             #     self.n_owned_options -= 1
             #     # self._portfolio.sell_option(option_index)
             self._portfolio.sell_option(option_index)
+            self.positions = -1
 
         # print(self.current_date, action)
         # print("Current options owned:", self.owned_options)
@@ -383,7 +385,7 @@ class TradingEnv(gym.Env):
             date = self.df.index.values[self._idx],
             position_index =None,
             position = self._position,
-            real_position = 0,# self._portfolio.real_position(price),
+            real_position = action,# self._portfolio.real_position(price),
             data =  dict(zip(self._info_columns, self._info_array[self._idx])),
             portfolio_valuation = portfolio_value,
             portfolio_distribution = portfolio_distribution, 
