@@ -17,5 +17,5 @@ class State:
     options_available: pl.DataFrame = field(default_factory=pl.DataFrame)
     history: List[dict] = field(default_factory=list)  # Or a more specific structure
 
-def initialize_state(initial_cash: float = 1000.0) -> State:
-    return State(cash=initial_cash, portfolio_value=initial_cash)
+def initialize_state(current_step: int = 0, initial_cash: float = 1000.0) -> State:
+    return State(current_step = current_step, cash=initial_cash, portfolio_value=initial_cash)

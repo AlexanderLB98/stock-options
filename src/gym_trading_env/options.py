@@ -73,11 +73,12 @@ def define_action_space(env: gym.Env) -> spaces.Discrete:
         {[(1 * 2) + 1] * 1} * 2
         = 3 * 2 = 6
     This means the action space is discrete with 6 actions.
+    So right now you cant go short.
     """
     # n_options = len(env.options)
     n_options = (env.n_strikes * 2 + 1) * env.n_months * 2  # 2 for call and put options
     # Add the maximum number of options that can be owned at once
-    max_own = env.MAX_OPTIONS 
+    max_own = env.max_options 
     return spaces.Discrete(n_options + max_own)
 
 
