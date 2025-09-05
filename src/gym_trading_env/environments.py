@@ -23,9 +23,6 @@ import tempfile, os
 import warnings
 warnings.filterwarnings("error")
 
-RENDER = False
-# MAX_OPTIONS = 10  # max options you can own at once
-
 def basic_reward_function(history : History):
     return np.log(history["portfolio_valuation", -1] / history["portfolio_valuation", -2])
 
@@ -55,8 +52,51 @@ class TradingEnv(gym.Env):
                 ):
         self.reward_function = reward_function
         self.portfolio_initial_value = float(portfolio_initial_value)
-        self._set_df(df)
+        self.df = df
  
+        # Features
+        self._features = [col for col in df.columns if "feature" in col]
+        self._nb_features = len(self._features)
+
+        # Options
+        self._initialize_options_parameters(max_options, n_strikes, n_months, strike_step_pct)
+
+        # self.action_space = spaces.Discrete(len(positions))
+        self.action_space = define_action_space(self)
+        self._initialize_observation_space()
+
+    def get_obs(self):
+        pass
+
+    def reset(self, seed = None, options=None, **kwargs):
+        pass
+
+    def render(self):
+        pass
+
+    def step(self, action):
+        pass
+
+    def perform_action(self, action):
+        """ Perform the given action in the environment. Buy/Sell/Do nothing with options."""
+        pass
+
+    def get_reward(self):
+        """ Calculate the reward for the current step"""
+        pass
+
+    def get_portfolio_value(self):
+        """ Calculates and return the current portfolio value. """
+        pass
+
+    def update_options(self):
+        """ Update the available options based on the current date and price. """
+        pass
+
+    def update_history(self):
+        pass
+
+    def _initialize_options_parameters(self, max_options, n_strikes, n_months, strike_step_pct):
         self.options = pl.DataFrame()
         self.MAX_OPTIONS = max_options  # max options you can own at once
         self.owned_options = [] 
@@ -65,43 +105,21 @@ class TradingEnv(gym.Env):
         self.n_months = n_months
         self.strike_step_pct = strike_step_pct  # step percentage for strikes
         self.n_options = (self.n_strikes * 2 + 1) * self.n_months * 2  # 2 for call and put options
-       
-        # self.action_space = spaces.Discrete(len(positions))
-        self.action_space = define_action_space(self)
-
+ 
+    def _initialize_observation_space(self):
+        """ Initialize the observation space based on features and options.
+         The observation space includes:
+         - The features (self._nb_features): open, high, low, close, volume
+         - TBI: Include windows of past features.
+         - For each option, 4 features: type (call/put), strike, premium, days_to_expiry
+         """
         self.observation_space = spaces.Box(
             -np.inf,
             np.inf,
             shape = [self._nb_features + self.n_options * 4, ]  # 4 features for each option (type, strike, premium, days_to_expiry)
         )
 
-    def _set_df(self, df):
-        df = df.copy()
-        self._features_columns = [col for col in df.columns if "feature" in col]
-        self._info_columns = list(set(list(df.columns) + ["close"]) - set(self._features_columns))
-        self._nb_features = len(self._features_columns)
-        self._nb_static_features = self._nb_features
-
-        for i  in range(len(self.dynamic_feature_functions)):
-            df[f"dynamic_feature__{i}"] = 0
-            self._features_columns.append(f"dynamic_feature__{i}")
-            self._nb_features += 1
-
-        self.df = df
-        self._obs_array = np.array(self.df[self._features_columns], dtype= np.float32)
-        self._info_array = np.array(self.df[self._info_columns])
-        self._price_array = np.array(self.df["close"])
-
     
-    def reset(self, seed = None, options=None, **kwargs):
-        pass
-
-
-    def render(self):
-        pass
-
-    def step(self, action):
-        pass
 
 def load_data(csv_path):
     """Carga los datos de precios desde un CSV."""
