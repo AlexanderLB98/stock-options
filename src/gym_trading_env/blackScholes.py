@@ -139,7 +139,7 @@ def get_third_fridays(n_months: int, start_date: date = None):
     - List[date]: List of third Fridays as datetime.date objects.
     """
     if start_date is None:
-        start_date = date.today()
+        start_date = datetime.today()
 
     third_fridays = []
     year = start_date.year
@@ -154,7 +154,7 @@ def get_third_fridays(n_months: int, start_date: date = None):
         else:
             third_friday = month_cal[3][calendar.FRIDAY]
 
-        third_fridays.append(date(year, month, third_friday))
+        third_fridays.append(datetime(year, month, third_friday))
 
         # Increment month/year
         month += 1
