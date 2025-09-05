@@ -55,31 +55,61 @@ class Option:
             self.value = blackScholesPut(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
             return self.value
 
-def define_action_space(env: gym.Env) -> spaces.Discrete:
+def define_action_space(env: gym.Env) -> spaces.MultiBinary:
     """
-    Define the action space for the trading environment.
-    The action space is a discrete space representing different trading actions.
-    
-    The action space is dependent on the variables:
-    - `MAX_OPTIONS`: The maximum number of options that can be owned at once.
-    - The number of options available, which depends on:
-        - number of strikes: this is multiplied by 2 (2 strikes above and 2 below 
-        the spot price) + the spot price itself.
-        - number of months
-        - All times 2 because of the two types of options (call and put).
-    So its 
-        {[(n_strikes * 2) + 1 ] * n_months } * 2 + MAX_OPTIONS
-    The case with only 1 month, 1 strike, and max 2 optiones would be:
-        {[(1 * 2) + 1] * 1} * 2
-        = 3 * 2 = 6
-    This means the action space is discrete with 6 actions.
-    So right now you cant go short.
+    Defines the action space for the trading environment as a MultiBinary space.
+
+    Each element in the MultiBinary array corresponds to an available option (call or put).
+    For each option:
+        - 1 means "buy" (take action on this option)
+        - 0 means "do nothing" (do not act on this option)
+
+    The total number of actions (bits) is determined by:
+        n_options = ((n_strikes * 2) + 1) * n_months * 2
+    where:
+        - n_strikes: Number of strikes above and below the spot price
+        - n_months: Number of months to consider for options
+        - 2: For both call and put options
+
+    Example:
+        If n_strikes=1, n_months=1:
+            n_options = ((1*2)+1)*1*2 = 6
+            action = [1, 0, 0, 1, 0, 0]  # Buy options 0 and 3, do nothing on others
+
+    Returns:
+        gymnasium.spaces.MultiBinary: The action space for the environment.
     """
-    # n_options = len(env.options)
     n_options = (env.n_strikes * 2 + 1) * env.n_months * 2  # 2 for call and put options
-    # Add the maximum number of options that can be owned at once
-    max_own = env.max_options 
-    return spaces.Discrete(n_options + max_own)
+    return spaces.MultiBinary(n_options)
+
+def define_action_space_with_sell(env: gym.Env) -> spaces.MultiDiscrete:
+    """
+    Defines the action space for the trading environment as a MultiDiscrete space.
+
+    Each element in the MultiDiscrete array corresponds to an available option (call or put).
+    For each option:
+        - 0 means "sell"
+        - 1 means "hold" (do nothing)
+        - 2 means "buy"
+
+    The total number of actions is determined by:
+        n_options = ((n_strikes * 2) + 1) * n_months * 2
+    where:
+        - n_strikes: Number of strikes above and below the spot price
+        - n_months: Number of months to consider for options
+        - 2: For both call and put options
+
+    Example:
+        If n_strikes=1, n_months=1:
+            n_options = ((1*2)+1)*1*2 = 6
+            action = [2, 1, 0, 2, 1, 1]  # Buy options 0 and 3, sell option 2, hold others
+
+    Returns:
+        gymnasium.spaces.MultiDiscrete: The action space for the environment.
+    """
+    n_options = (env.n_strikes * 2 + 1) * env.n_months * 2  # 2 for call and put options
+    # Each option: 0=sell, 1=hold, 2=buy
+    return spaces.MultiDiscrete([3] * n_options)
 
 
 if __name__ == "__main__":

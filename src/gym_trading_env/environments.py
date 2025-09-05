@@ -326,3 +326,4 @@ if __name__ == "__main__":
     print(f"Observation space shape: {env.observation_space.shape}")
     print(f"Observation space: {len(obs)}")
     print(f"Action space shape: {env.action_space}")
+    print(f"Action space sample: {env.action_space.sample()}")
