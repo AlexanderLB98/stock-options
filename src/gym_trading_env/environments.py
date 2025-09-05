@@ -101,7 +101,44 @@ class TradingEnv(gym.Env):
         pass
 
     def step(self, action):
-        pass
+        """Take a step in the environment.
+
+        steps:
+        - perform the action (buy/sell/hold options)
+        - get reward
+        - update the state (current step, date, price, available options)
+        - update porfolio value
+        - log/history
+        - get observation
+        - get info
+
+        Args:
+            action: The action to take (e.g., buy/sell/hold for each option)
+        Returns:
+            tuple: (observation, reward, terminated, truncated, info)
+        """
+        self.perform_action(action)
+
+        self.state.current_step += 1
+        self.state.current_date = self.df[self.state.current_step, "date"]
+        self.state.current_price = self.df[self.state.current_step, "close"]
+        # Get list of available options for the current date
+        self.update_options()
+        
+        observation = self._get_obs()
+        info = self._get_info()
+
+
+
+
+
+        reward = 0    
+        terminated = False
+        truncated = False
+        if self.state.current_step >= len(self.df) - 1:
+            truncated = True
+        
+        return obs, reward, terminated, truncated, info
 
     def perform_action(self, action):
         """ Perform the given action in the environment. Buy/Sell/Do nothing with options.
@@ -315,7 +352,7 @@ if __name__ == "__main__":
     df = load_data(csv_path)
 
     env = TradingEnv(df, window_size=10)
-    env = FlattenObservation(env)
+    # env = FlattenObservation(env)
     
     obs, info = env.reset()
     print("Initial observation:", obs)
@@ -327,3 +364,22 @@ if __name__ == "__main__":
     print(f"Observation space: {len(obs)}")
     print(f"Action space shape: {env.action_space}")
     print(f"Action space sample: {env.action_space.sample()}")
+
+
+    done, truncated = False, False
+    observation, info = env.reset()
+    while not done and not truncated:
+        # Pick a position by its index in your position list (=[-1, 0, 1])....usually something like : position_index = your_policy(observation)
+        action = env.action_space.sample() 
+        observation, reward, done, truncated, info = env.step(action)
+        print(f"Observation: {observation}")
+        print(f"Reward: {reward}, Done: {done}, Truncated: {truncated}, Info: {info}")
+        print(20*"-")
+
+        print(20*"-")
+        print(f"Observation space shape: {env.observation_space.shape}")
+        print(f"Observation space: {len(obs)}")
+        print(f"Action space shape: {env.action_space}")
+        print(f"Action space sample: {env.action_space.sample()}")
+        print(20*"-")
+

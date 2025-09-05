@@ -63,6 +63,9 @@ def define_action_space(env: gym.Env) -> spaces.MultiBinary:
     For each option:
         - 1 means "buy" (take action on this option)
         - 0 means "do nothing" (do not act on this option)
+    The last options are the owned options slots, where:
+        - 1 means "sell" (sell the option in that slot)
+        - 0 means "do nothing" (keep the option in that slot)
 
     The total number of actions (bits) is determined by:
         n_options = ((n_strikes * 2) + 1) * n_months * 2
@@ -80,7 +83,9 @@ def define_action_space(env: gym.Env) -> spaces.MultiBinary:
         gymnasium.spaces.MultiBinary: The action space for the environment.
     """
     n_options = (env.n_strikes * 2 + 1) * env.n_months * 2  # 2 for call and put options
-    return spaces.MultiBinary(n_options)
+    # Add the maximum number of options that can be owned at once
+    max_own = env.max_options
+    return spaces.MultiBinary(n_options + max_own)
 
 def define_action_space_with_sell(env: gym.Env) -> spaces.MultiDiscrete:
     """
