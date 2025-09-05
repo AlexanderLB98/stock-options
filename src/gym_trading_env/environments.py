@@ -59,12 +59,14 @@ class TradingEnv(gym.Env):
         self.portfolio_initial_value = float(portfolio_initial_value)
         self.df = df
         self.window_size = window_size
+
         # Features
         self._features = [col for col in df.columns if "feature" in col]
         self._nb_features = len(self._features)
 
         # Options
         self._initialize_options_parameters(max_options, n_strikes, n_months, strike_step_pct)
+        self.portfolio = OptionsPortfolio(initial_cash=self.portfolio_initial_value, max_options=self.max_options)
 
         # self.action_space = spaces.Discrete(len(positions))
         self.action_space = define_action_space(self)
@@ -72,9 +74,6 @@ class TradingEnv(gym.Env):
         self._initialize_observation_space()
         self.reset()
 
-    def _get_info(self):
-        return self.state
-  
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         """Start a new episode.
 
@@ -122,17 +121,15 @@ class TradingEnv(gym.Env):
         self.state.current_step += 1
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
+
+        self.state.portfolio_value = self.get_portfolio_value()
         # Get list of available options for the current date
         self.update_options()
         
         observation = self._get_obs()
         info = self._get_info()
 
-
-
-
-
-        reward = 0    
+        reward = self.get_reward()
         terminated = False
         truncated = False
         if self.state.current_step >= len(self.df) - 1:
@@ -140,12 +137,29 @@ class TradingEnv(gym.Env):
         
         return obs, reward, terminated, truncated, info
 
-    def perform_action(self, action):
+    def perform_action(self, actions):
         """ Perform the given action in the environment. Buy/Sell/Do nothing with options.
         ACtion could be a discrete list with len of available options, 0 to do nothing, 1 to buy n option and -1 to sell n option.
         """
-        pass
-
+        
+        # Loop over all the options to perform the action
+        for i, action in enumerate(actions):
+            print(f"action[{i}] = {action}")
+            if i < self.n_options:
+                print("Action on available options: buy or do nothing")
+                option = self.state.options_available[i]
+                if action == 1:
+                    print(f"Buying option {option}")
+                    # self.portfolio.buy_option(option)
+                elif action == 0:
+                    print("Doing nothing")
+            else:
+                print("Action on owned options: sell or do nothing")
+                n_owned = i - self.n_options
+                print(f"n_owned = {n_owned}")
+                 
+        return 0
+    
     def get_reward(self):
         """ Calculate the reward for the current step"""
         pass
@@ -322,13 +336,10 @@ class TradingEnv(gym.Env):
             "available_options": Box(-np.inf, np.inf, shape=(M, 4)),
             "owned_options": Box(-np.inf, np.inf, shape=(K, 4)),
         })
-        # self.observation_space = spaces.Box(
-        #     -np.inf,
-        #     np.inf,
-        #     shape = [self._nb_features + self.n_options * 4, ]  # 4 features for each option (type, strike, premium, days_to_expiry)
-        # )
 
-    
+    def _get_info(self):
+        return self.state
+  
 
 def load_data(csv_path):
     """Carga los datos de precios desde un CSV."""
