@@ -7,8 +7,9 @@ class OptionsPortfolio:
     """
     Portfolio for managing options contracts.
     """
-    def __init__(self, initial_cash, max_options=2):
+    def __init__(self, initial_cash:float, max_options: int=2):
         self.cash = initial_cash
+        self.portfolio_value = initial_cash
         self.max_options = max_options
         self.owned_options = [None] * max_options  # Each slot can hold an Option or None
 
