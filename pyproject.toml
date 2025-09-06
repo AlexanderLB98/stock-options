@@ -1,34 +1,21 @@
-[build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
-
-[project]
-name = "gym-trading-env"
-version = "0.3.2"
-license = {file = "LICENSE.txt"}
-authors = [
-  { name="Clement Perroud", email="clement.perroud.pro@gmail.com" },
-]
-description = "A simple, easy, customizable Open IA Gym environments for trading."
+[tool.poetry]
+name = "stock-options"
+version = "0.1.0"
+description = "A GYM based environment for financial options created for Reinforcement Learning purposes"
+authors = ["AlexanderLB98 <alexanderbool98@gmail.com>"]
 readme = "README.md"
-requires-python = ">=3.12"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
-dependencies = [
-  "pandas>=1.5.3", 
-  "numpy>=1.21.1", 
-  "gymnasium>=0.28.1", 
-  "flask>=2.2.3", 
-  "pyecharts>=2.0.2", 
-  "ccxt==3.0.59", 
-  "nest_asyncio", 
-  "stable-baselines3 (>=2.7.0,<3.0.0)", 
-  "tensorboard (>=2.20.0,<3.0.0)"
-]
+packages = [{include = "stock_options", from = "src"}] # Assuming your code is in src/stock_options
 
-[project.urls]
-"Homepage" = "https://github.com/ClementPerroud/Gym-Trading-Env"
-"Bug Tracker" = "https://github.com/ClementPerroud/Gym-Trading-Env/issues"
+[tool.poetry.dependencies]
+python = ">=3.13"
+polars = ">=1.3.0"
+gymnasium = "*"   
+numpy = "*"       
+scipy = "^1.16.1"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.0" # For testing
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

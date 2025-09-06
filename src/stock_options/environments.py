@@ -12,15 +12,15 @@ from collections import Counter
 from gymnasium.spaces import Dict, Box, Discrete
 from gymnasium.wrappers import FlattenObservation
 
-from gym_trading_env.options import Option
-from gym_trading_env.stateManagement import initialize_state, State
-from gym_trading_env.utils.portfolio import Portfolio, TargetPortfolio
-from gym_trading_env.utils.history import History
-from gym_trading_env.utils.optionsPortfolio import OptionsPortfolio
+from stock_options.options import Option
+from stock_options.stateManagement import initialize_state, State
+from stock_options.utils.portfolio import Portfolio, TargetPortfolio
+from stock_options.utils.history import History
+from stock_options.utils.optionsPortfolio import OptionsPortfolio
 
-from gym_trading_env.blackScholes import gen_option_for_date
+from stock_options.blackScholes import gen_option_for_date
 # from src.options import define_action_space, Option
-from gym_trading_env.options import define_action_space
+from stock_options.options import define_action_space
 
 # from datetime import datetime, date
 
@@ -214,7 +214,7 @@ class TradingEnv(gym.Env):
                 if action == 1 and n_owned < len(self.state.owned_options):
                     logger.info(f"Selling owned option {self.state.owned_options[n_owned]}")
                     # self.portfolio.sell_option(self.state.owned_options[n_owned])
-        return 0
+
     
     def get_reward(self):
         """ Calculate the reward for the current step
@@ -230,7 +230,8 @@ class TradingEnv(gym.Env):
 
     def get_portfolio_value(self):
         """ Calculates and return the current portfolio value. """
-        return self.state.portfolio_value
+        # return self.state.portfolio_value # PLACEHOLDER
+        return self.portfolio.get_current_total_value(self.state.current_price, self.state.current_date)
 
     def update_options(self) -> list[Option]:
         """ Update the available options based on the current date and price. 
@@ -558,11 +559,11 @@ if __name__ == "__main__":
         assert len(flat_obs) == expected_flat_obs_shape, f"Step {info.current_step}: Flattened observation shape mismatch: {len(flat_obs)} vs {expected_flat_obs_shape}"
 
         # High-level checks for critical external state
-        # assert info.portfolio_value >= 0, f"Step {info.current_step}: Portfolio value became negative: {info.portfolio_value}"
+        assert info.portfolio_value >= 0, f"Step {info.current_step}: Portfolio value became negative: {info.portfolio_value}"
         assert info.cash >= 0, f"Step {info.current_step}: Cash became negative: {info.cash}"
         assert len(info.options_available) <= env.n_options, f"Step {info.current_step}: Too many available options: {len(info.options_available)} > {env.n_options}"
         
-        # logger.info(f"Step {info.current_step}: Reward={reward:.4f}, Portfolio={info.portfolio_value:.2f}, Cash={info.cash:.2f}, Available Options={len(info.options_available)}")
+        logger.info(f"Step {info.current_step}: Reward={reward:.4f}, Portfolio={info.portfolio_value:.2f}, Cash={info.cash:.2f}, Available Options={len(info.options_available)}")
         logger.debug(f"Obs: {observation}") # Use debug for full observation, info
 
         current_test_step += 1
@@ -571,7 +572,7 @@ if __name__ == "__main__":
     logger.info("Episode loop test finished.")
     logger.info(f"Total steps taken in test: {current_test_step}")
     logger.info(f"Total episode reward: {sum(episode_rewards):.4f}")
-    # logger.info(f"Final portfolio value: {info.portfolio_value:.2f}")
+    logger.info(f"Final portfolio value: {info.portfolio_value:.2f}")
 
     # Final assert after loop
     assert done or truncated, "Episode loop terminated unexpectedly."

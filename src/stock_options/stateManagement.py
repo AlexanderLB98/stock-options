@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import TypedDict, Optional, List
 import polars as pl
 import datetime
-from gym_trading_env.options import Option
+from stock_options.options import Option
 
 @dataclass
 class State:
