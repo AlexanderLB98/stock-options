@@ -13,7 +13,7 @@ from gymnasium.spaces import Dict, Box, Discrete
 from gymnasium.wrappers import FlattenObservation
 
 from gym_trading_env.options import Option
-from gym_trading_env.stateManagement import initialize_state
+from gym_trading_env.stateManagement import initialize_state, State
 from gym_trading_env.utils.portfolio import Portfolio, TargetPortfolio
 from gym_trading_env.utils.history import History
 from gym_trading_env.utils.optionsPortfolio import OptionsPortfolio
@@ -117,10 +117,16 @@ class TradingEnv(gym.Env):
         # IMPORTANT: Must call this first to seed the random number generator
         super().reset(seed=seed)
         
-        self._initialize_state()
+        self.state = self._initialize_state()
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
         
+        # ---Checks added for debugging---
+        assert self.state.cash == self.portfolio_initial_value, "Initial cash mismatch after reset."
+        assert self.state.portfolio_value == self.portfolio_initial_value, "Initial portfolio value mismatch after reset."
+        logger.debug(f"Reset: State initialized. Cash: {self.state.cash}, Portfolio Value: {self.state.portfolio_value}")
+        # --- End of check ---
+
         # Get list of available options for the current date
         self.state.options_available = self.update_options()
         observation = self._get_obs()
@@ -149,10 +155,22 @@ class TradingEnv(gym.Env):
         Returns:
             tuple: (observation, reward, terminated, truncated, info)
         """
+
+        terminated = False
+        truncated = False
+        
+        # --- Check action validity ---
+        if not self.action_space.contains(action):
+            logger.error(f"Action {action} is not within the defined action space: {self.action_space}")
+            raise ValueError(f"Action {action} is invalid.")
+        logger.debug(f"Step {self.state.current_step}: Action received: {action}")
+        # --- End of check ---
+
         self.perform_action(action)
 
         self.state.current_step += 1
         logger.info(f"Current step: {self.state.current_step}")
+
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
 
@@ -164,8 +182,7 @@ class TradingEnv(gym.Env):
         info = self._get_info()
 
         reward = self.get_reward()
-        terminated = False
-        truncated = False
+
         if self.state.current_step >= len(self.df) - 1:
             truncated = True
         
@@ -200,8 +217,16 @@ class TradingEnv(gym.Env):
         return 0
     
     def get_reward(self):
-        """ Calculate the reward for the current step"""
-        pass
+        """ Calculate the reward for the current step
+        returns: float : The reward for the current step
+        """
+        reward = 0.0
+        # --- check Reward ---
+        assert isinstance(reward, (float)), f"Reward must be a float, got {type(reward)}"
+        logger.info(f"Step {self.state.current_step}: Reward={reward}")
+        # --- End of check ---
+        
+        return reward
 
     def get_portfolio_value(self):
         """ Calculates and return the current portfolio value. """
@@ -259,6 +284,7 @@ class TradingEnv(gym.Env):
         logger.info(f"Current date: {self.state.current_date}")
         logger.info(f"Number of generated options: {len(self.options)}")
         logger.info(f"Numero de opciones disponibles unicas: {len(self.state.options_available)}")
+        assert len(options_available) <= self.n_options, "More available options than n_options limit!"
         return options_available
     
     def update_history(self):
@@ -283,7 +309,7 @@ class TradingEnv(gym.Env):
         self.strike_step_pct = strike_step_pct  # step percentage for strikes
         self.n_options = (self.n_strikes * 2 + 1) * self.n_months * 2  # Number of available options. 2 for call and put options
  
-    def _initialize_state(self):
+    def _initialize_state(self) -> State:
         """ Initialize the state of the environment using the dataclass.
          The state includes:
          - current_step: int : The current step in the episode. Its defined from the window_size, so the first step is window_size.
@@ -296,8 +322,15 @@ class TradingEnv(gym.Env):
          - owned_options: list : The list of currently owned options.
          - options_available: list : The list of currently available options.
          - history: History : The history of the episode.
+
+        returns:
+            state: The initialized state object.
         """
-        self.state = initialize_state(current_step = self.window_size, initial_cash = self.portfolio_initial_value)
+        state = initialize_state(current_step = self.window_size, initial_cash = self.portfolio_initial_value)
+        assert state.current_step == self.window_size, "Initial step mismatch."
+        assert state.cash == self.portfolio_initial_value, "Initial cash mismatch."
+        logger.debug(f"State initialized: current_step={state.current_step}, cash={state.cash}")
+        return state
 
     def _get_obs(self):
         """"
@@ -343,11 +376,13 @@ class TradingEnv(gym.Env):
         
         closes = self.df[start:self.state.current_step + 1, "close"].to_numpy().flatten()
         closes = np.pad(closes, (N - len(closes), 0), 'constant', constant_values=0)
-
+        assert closes.shape == (N,), f"last_closes shape mismatch: {closes.shape} vs {(N,)}"
+        
         # Last N volumes
         volumes = self.df[start:self.state.current_step + 1, "volume"].to_numpy().flatten()
         volumes = np.pad(closes, (N - len(closes), 0), 'constant', constant_values=0)
-
+        assert volumes.shape == (N,), f"last_volumes shape mismatch: {volumes.shape} vs {(N,)}"
+        
         # --- 3. Available options ---
         options_list = self.state.options_available  # Now a list of Option objects
         type_map = {"call": 0, "put": 1}
@@ -364,6 +399,7 @@ class TradingEnv(gym.Env):
             else:
                 available_options.append([0, 0.0, 0.0, 0.0])
         available_options = np.array(available_options, dtype=np.float32)
+        assert available_options.shape == (M, 4), f"available_options shape mismatch: {available_options.shape} vs {(M, 4)}"
 
         # --- 4. Owned options ---
         owned_options = []
@@ -379,6 +415,7 @@ class TradingEnv(gym.Env):
             else:
                 owned_options.append([0, 0.0, 0.0, 0.0])
         owned_options = np.array(owned_options, dtype=np.float32)
+        assert owned_options.shape == (K, 4), f"owned_options shape mismatch: {owned_options.shape} vs {(K, 4)}"
 
         obs = {
             "today": today,
@@ -412,6 +449,8 @@ class TradingEnv(gym.Env):
         M = self.n_options # available options
         K = self.max_options # max possible owned options
 
+        logger.info(f"Observation space initialized with N={N}, M={M} (n_options), K={K} (max_options)")
+        
         self.observation_space = Dict({
             "today": Dict({
                 "open": Box(-np.inf, np.inf, shape=()),
@@ -425,6 +464,7 @@ class TradingEnv(gym.Env):
             "available_options": Box(-np.inf, np.inf, shape=(M, 4)),
             "owned_options": Box(-np.inf, np.inf, shape=(K, 4)),
         })
+        logger.debug(f"Full observation space definition: {self.observation_space}")
 
     def _get_info(self):
         return self.state
@@ -445,7 +485,6 @@ def load_data(csv_path):
     ])
     return df
 
-import numpy as np
 
 def flatten_obs(obs: dict)-> np.ndarray:
     """ Flatten the observation dictionary into a 1D numpy array. """
@@ -460,57 +499,69 @@ def flatten_obs(obs: dict)-> np.ndarray:
             flat.append(v)
     return np.array(flat, dtype=np.float32)
 
+
 if __name__ == "__main__":
     csv_path = "data/PHIA.csv"
-
     df = load_data(csv_path)
 
-    env = TradingEnv(df, window_size=10, n_months = 1)
-    # env = FlattenObservation(env)
-    
+    logger.info("Initializing environment for basic test...")
+    env = TradingEnv(df, window_size=10, n_months=1) # Use a basic reward
+
+    # --- Initial State Check ---
     observation, info = env.reset()
-    logger.info("Initial observation:", observation)
-    logger.info("Initial info:", info)
+    logger.info("Environment reset. Performing initial state assertions.")
+    # Assertions on the very first state after reset
+    expected_flat_obs_shape = 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
+    assert len(flatten_obs(observation)) == expected_flat_obs_shape, f"Initial flattened observation shape mismatch: {len(flatten_obs(observation))} vs {expected_flat_obs_shape}"
+    assert info.current_step == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
+    assert info.cash == env.portfolio_initial_value, f"Initial cash should be {env.portfolio_initial_value}, got {info.cash}"
+    assert info.portfolio_value == env.portfolio_initial_value, f"Initial portfolio value should be {env.portfolio_initial_value}, got {info.portfolio_value}"
+    assert len(info.options_available) <= env.n_options, f"Initial reset: Too many available options: {len(info.options_available)} > {env.n_options}"
+    logger.info("Initial state assertions passed.")
+    logger.debug(f"Initial observation: {observation}")
+    logger.debug(f"Initial info: {info}")
 
-    # Example flatten usage:
-    logger.info("Flattened observation:")
-    flat_obs = flatten_obs(observation)
-    logger.info(flat_obs.shape)
-    logger.info(flat_obs)
 
-
-    logger.info(20*"-")
-    logger.info(f"Observation space shape: {env.observation_space.shape}")
-    logger.info(f"Observation space: {len(observation)}")
-    logger.info(f"Action space shape: {env.action_space}")
+    logger.info("-" * 20)
+    logger.info(f"Observation space: {env.observation_space}")
+    logger.info(f"Action space: {env.action_space}")
     logger.info(f"Action space sample: {env.action_space.sample()}")
+    logger.info("-" * 20)
 
-
+    # --- Episode Loop Test ---
     done, truncated = False, False
-    observation, info = env.reset()
+    episode_rewards = []
+    
+    # Re-reset just to ensure a clean start for the loop if initial inspection modified state (it shouldn't, but good practice)
+    observation, info = env.reset() 
+    logger.info("Starting episode loop test...")
+    
+    current_test_step = 0
+
     while not done and not truncated:
         action = env.action_space.sample() 
         observation, reward, done, truncated, info = env.step(action)
+        episode_rewards.append(reward)
 
-        # Example flatten usage: Verify its the corresponding shape:
-        logger.info("Flattened observation:")
         flat_obs = flatten_obs(observation)
-        logger.info(flat_obs.shape)
-        logger.info(flat_obs)
+        # Verify flattened observation shape in loop
+        assert len(flat_obs) == expected_flat_obs_shape, f"Step {info.current_step}: Flattened observation shape mismatch: {len(flat_obs)} vs {expected_flat_obs_shape}"
 
+        # High-level checks for critical external state
+        # assert info.portfolio_value >= 0, f"Step {info.current_step}: Portfolio value became negative: {info.portfolio_value}"
+        assert info.cash >= 0, f"Step {info.current_step}: Cash became negative: {info.cash}"
+        assert len(info.options_available) <= env.n_options, f"Step {info.current_step}: Too many available options: {len(info.options_available)} > {env.n_options}"
+        
+        # logger.info(f"Step {info.current_step}: Reward={reward:.4f}, Portfolio={info.portfolio_value:.2f}, Cash={info.cash:.2f}, Available Options={len(info.options_available)}")
+        logger.debug(f"Obs: {observation}") # Use debug for full observation, info
 
+        current_test_step += 1
+        logger.info("-" * 10) # Shorter separator for steps
 
-        logger.info(f"Observation: {observation}")
-        logger.info(f"Reward: {reward}, Done: {done}, Truncated: {truncated}, Info: {info}")
-        logger.info(20*"-")
+    logger.info("Episode loop test finished.")
+    logger.info(f"Total steps taken in test: {current_test_step}")
+    logger.info(f"Total episode reward: {sum(episode_rewards):.4f}")
+    # logger.info(f"Final portfolio value: {info.portfolio_value:.2f}")
 
-        logger.info(20*"-")
-        logger.info(f"Observation space shape: {env.observation_space.shape}")
-        logger.info(f"Observation space: {len(observation)}")
-        logger.info(f"Action space shape: {env.action_space}")
-        logger.info(f"Action space sample: {env.action_space.sample()}")
-        logger.info(f"Number of available options: {len(info.options_available)}")
-        logger.info(20*"-")
-
-        # assert len(flatten_obs(observation)) == 73, "Flattened observation should be shape (73,) with this configuration."
-        logger.info("Flattened observation looks good.")
+    # Final assert after loop
+    assert done or truncated, "Episode loop terminated unexpectedly."
