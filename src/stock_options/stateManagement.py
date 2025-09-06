@@ -13,7 +13,6 @@ class State:
     current_date: Optional[datetime.datetime] = None
     current_price: float = 0.0
     portfolio: OptionsPortfolio = None
-    owned_options: List[Option] = field(default_factory=list)
     options_available: pl.DataFrame = field(default_factory=pl.DataFrame)
     history: List[dict] = field(default_factory=list)  # Or a more specific structure
 

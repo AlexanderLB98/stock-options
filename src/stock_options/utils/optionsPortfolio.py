@@ -17,10 +17,13 @@ class OptionsPortfolio:
     Portfolio for managing options contracts.
     """
     def __init__(self, initial_cash:float, max_options: int=2):
+        self.initial_cash = initial_cash
         self.cash = initial_cash
         self.portfolio_value = initial_cash
         self.max_options = max_options
         self.owned_options = [None] * max_options  # Each slot can hold an Option or None
+        self.total_value_diff: float = 0.0
+        self.value_diff: float = 0.0
 
     def buy_option(self, option: Option):
         """
@@ -38,13 +41,15 @@ class OptionsPortfolio:
         logger.info("No slot available to buy more options.")
         return False
 
-    def sell_option(self, index):
+    def sell_option(self, index, current_date: datetime):
         """
         Sell the option at the given index if owned.
         """
         if 0 <= index < self.max_options and self.owned_options[index] is not None:
             option = self.owned_options[index]
-
+            if current_date == option.date_generated:
+                logger.info("Cannot sell an option on the same day it was bought.")
+                return False
             self.cash += option.value  # Assuming value is updated before selling
             logger.info(f"Sold option: {option}")
             logger.info(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
@@ -59,11 +64,13 @@ class OptionsPortfolio:
         Initializes the total value with the current cash, then adds the evaluated value of each owned option.
 
         If the option is expired, it is sold automatically at current value and removed from the portfolio.
+        Aditionally, it shows the difference with previous day.
 
         Parameters:
         - price (float): Current underlying asset price.
         - date (date): Current date for option valuation.
         """
+
         total_value = self.cash
         for i, opt in enumerate(self.owned_options):
             if opt is not None:
@@ -73,6 +80,10 @@ class OptionsPortfolio:
                     self.owned_options[i] = None
                     self.cash += option_value
                 total_value += option_value # opt.value
+        self.value_diff = total_value - self.portfolio_value
+        self.total_value_diff = (total_value - self.initial_cash) / self.initial_cash
+        # self.total_value_diff += self.value_diff # Or just always total_value - initial_cash. SAME?
+        self.previous_value = total_value
         return total_value
 
     def get_portfolio_distribution(self):

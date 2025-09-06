@@ -58,7 +58,6 @@ class TradingEnv(gym.Env):
 
     inputs:
     - df : polars.DataFrame : A dataframe containing the historical price data and features. It must contain a 'close' column and feature columns (with 'feature' in their name).
-    - reward_function : function : A function that takes the historical info (History object) and returns a reward (float). Default is basic_reward_function.
     - initial_cash : float : The initial value of the portfolio. Default is 1000.
     - max_options : int : The maximum number of options that can be owned at once. Default is 2.
     - n_strikes : int : The number of strikes above and below the spot price. Default is 2.
@@ -77,7 +76,6 @@ class TradingEnv(gym.Env):
 
     def __init__(self,
                 df : pl.DataFrame,
-                reward_function = None,
                 initial_cash = 1000,
                 window_size = 0,
                 max_options = 2,
@@ -85,7 +83,6 @@ class TradingEnv(gym.Env):
                 n_months = 1,
                 strike_step_pct = 0.1
                 ):
-        self.reward_function = reward_function
         self.initial_cash = float(initial_cash)
         self.df = df
         self.window_size = window_size
@@ -223,7 +220,6 @@ class TradingEnv(gym.Env):
                         # Check if option isinstance(Option)
                         self.state.portfolio.buy_option(option)
                         # Update the portfolio and state
-                        pass
                 except IndexError:
                     logger.info(f"No available option at index {i}, cannot buy.")
                 pass
@@ -249,12 +245,11 @@ class TradingEnv(gym.Env):
                 logger.info("selling option")
                 try:
                     # Check if there is an available option at index i
-                    option = self.state.portfolio.owned_options[i]
-                    if isinstance(option, Option):
+                    # option = self.state.portfolio.owned_options[i]
+                    if isinstance(self.state.portfolio.owned_options[i], Option):
                         # Sell the option
-                        # self.portfolios.sell_option(option)
+                        self.state.portfolio.sell_option(i, self.state.current_date)
                         # Update the portfolio and state
-                        pass
                 except IndexError:
                     logger.info(f"No available option at index {i}, cannot sell.")
                 pass
@@ -268,7 +263,7 @@ class TradingEnv(gym.Env):
         """ Calculate the reward for the current step
         returns: float : The reward for the current step
         """
-        reward = 0.0
+        reward = self.state.portfolio.value_diff
         # --- check Reward ---
         assert isinstance(reward, (float)), f"Reward must be a float, got {type(reward)}"
         logger.info(f"Step {self.state.current_step}: Reward={reward}")
@@ -413,13 +408,15 @@ class TradingEnv(gym.Env):
         K = self.max_options # max possible owned options
    
         # Expected shape: 5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
-        expected_shape = 2 + 5 + 2*N + 4*(M + K)
+        expected_shape = 4 + 5 + 2*N + 4*(M + K)
         logger.info(f"Expected observation shape: {expected_shape}")
 
         # --- 0. Current state for cash and portfolio value ---
         portfolio = {
             "cash": float(self.state.portfolio.cash),
-            "portfolio_value": float(self.state.portfolio.portfolio_value)
+            "portfolio_value": float(self.state.portfolio.portfolio_value),
+            "value_diff": float(self.state.portfolio.value_diff),
+            "total_value_diff": float(self.state.portfolio.total_value_diff)
         }
 
         # --- 1. Current state for today ---
@@ -496,17 +493,19 @@ class TradingEnv(gym.Env):
     def _initialize_observation_space(self):
         """ Initialize the observation space based on features and options.
          The observation space includes:
+         - Portfolio: cash, portfolio_value, value_diff, total_value_diff
          - The features (self._nb_features): open, high, low, close, volume
          - Include windows of past closes.
          - For each option, 4 features: type (call/put), strike, premium, days_to_expiry
 
          For example:
+         - Portfolio: 4 (cash, portfolio_value, value_diff, total_value_diff)
          - Features: 5 (open, high, low, close, volume)
          - last_closes: window_size (e.g., 10)
          - last_volumes: window_size (e.g., 10)
          - Options: n_options * 4 (e.g., 10 options * 4 features = 40)
          - Owned options: max_options * 4 (e.g., 2 options * 4 features = 8)
-         - Total: 5 + 10 + 10 + 40 + 8 = 73
+         - Total: 4 + 5 + 10 + 10 + 40 + 8 = 73
          """
         N = self.window_size  # window size for last closes
         M = self.n_options # available options
@@ -515,6 +514,12 @@ class TradingEnv(gym.Env):
         logger.info(f"Observation space initialized with N={N}, M={M} (n_options), K={K} (max_options)")
         
         self.observation_space = Dict({
+            "portfolio": Dict({
+                "cash": Box(low=0, high=np.inf, shape=(), dtype=np.float32),
+                "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
+                "value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
+                "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32)
+            }),
             "today": Dict({
                 "open": Box(-np.inf, np.inf, shape=()),
                 "close": Box(-np.inf, np.inf, shape=()),
@@ -574,7 +579,7 @@ if __name__ == "__main__":
     observation, info = env.reset()
     logger.info("Environment reset. Performing initial state assertions.")
     # Assertions on the very first state after reset
-    expected_flat_obs_shape = 2 + 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
+    expected_flat_obs_shape = 4 + 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
     assert len(flatten_obs(observation)) == expected_flat_obs_shape, f"Initial flattened observation shape mismatch: {len(flatten_obs(observation))} vs {expected_flat_obs_shape}"
     assert info.current_step == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
     assert info.portfolio.cash == env.initial_cash, f"Initial cash should be {env.initial_cash}, got {info.portfolio.cash}"
@@ -625,6 +630,7 @@ if __name__ == "__main__":
     logger.info(f"Total steps taken in test: {current_test_step}")
     logger.info(f"Total episode reward: {sum(episode_rewards):.4f}")
     logger.info(f"Final portfolio value: {info.portfolio.portfolio_value:.2f}")
+    logger.info(f"Final portfolio diff: {info.portfolio.total_value_diff:.2f}")
 
     # Final assert after loop
     assert done or truncated, "Episode loop terminated unexpectedly."
