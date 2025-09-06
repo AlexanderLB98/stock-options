@@ -1,7 +1,16 @@
 from stock_options.options import Option
 from datetime import datetime, date
 
-RENDER = False
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    force=True # Overwrite any existing logging configuration
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
 
 class OptionsPortfolio:
     """
@@ -18,18 +27,15 @@ class OptionsPortfolio:
         Buy an option if there is space and enough cash.
         """
         if self.cash < option.premium:
-            if RENDER:
-                print("Not enough cash to buy option.")
+            logger.info("Not enough cash to buy option.")
             return False
         for i in range(self.max_options):
             if self.owned_options[i] is None:
                 self.owned_options[i] = option
                 self.cash -= option.premium
-                if RENDER:
-                    print(f"Bought option: {option}")
+                logger.info(f"Bought option: {option}")
                 return True
-        if RENDER:
-            print("No slot available to buy more options.")
+        logger.info("No slot available to buy more options.")
         return False
 
     def sell_option(self, index):
@@ -40,28 +46,32 @@ class OptionsPortfolio:
             option = self.owned_options[index]
 
             self.cash += option.value  # Assuming value is updated before selling
-            if RENDER:
-                print(f"Sold option: {option}")
-                print(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
+            logger.info(f"Sold option: {option}")
+            logger.info(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
             self.owned_options[index] = None
             return True
-        if RENDER:
-            print(f"No option to sell at slot {index}.")
+        logger.info(f"No option to sell at slot {index}.")
         return False
 
     def get_current_total_value(self, price: float, date: datetime) -> float:
         """
         Calculate total current value of owned options and cash.
         Initializes the total value with the current cash, then adds the evaluated value of each owned option.
+
+        If the option is expired, it is sold automatically at current value and removed from the portfolio.
+
         Parameters:
         - price (float): Current underlying asset price.
         - date (date): Current date for option valuation.
         """
         total_value = self.cash
-        for opt in self.owned_options:
+        for i, opt in enumerate(self.owned_options):
             if opt is not None:
                 option_value = opt.evaluate_option(price, date)
-
+                if opt.expired:
+                    print(f"Option at slot {i} has expired and is being removed from portfolio.")
+                    self.owned_options[i] = None
+                    self.cash += option_value
                 total_value += option_value # opt.value
         return total_value
 

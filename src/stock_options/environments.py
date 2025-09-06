@@ -221,7 +221,7 @@ class TradingEnv(gym.Env):
                     option = self.state.options_available[i]
                     if isinstance(option, Option):
                         # Check if option isinstance(Option)
-                        # self.portfolio.buy_option(option)
+                        self.state.portfolio.buy_option(option)
                         # Update the portfolio and state
                         pass
                 except IndexError:
@@ -279,6 +279,7 @@ class TradingEnv(gym.Env):
     def get_portfolio_value(self) -> float:
         """ Calculates and return the current portfolio value. 
         Is used to update the state.portfolio.portfolio_value attribute inside the portfolio object, which is part of the state.
+        This happens every step, and also checks if options are expired. If so, sells them and removes them from the list
         """
         return self.state.portfolio.get_current_total_value(self.state.current_price, self.state.current_date)
 
@@ -468,10 +469,10 @@ class TradingEnv(gym.Env):
             if self.state.portfolio.owned_options[i] is not None:
                 opt = self.state.portfolio.owned_options[i]
                 owned_options.append([
-                    type_map.get(opt.type, -1),
+                    type_map.get(opt.option_type, -1),
                     opt.strike,
                     opt.premium,
-                    opt.days_to_expiry
+                    opt.days_to_expire
                 ])
             else:
                 owned_options.append([0, 0.0, 0.0, 0.0])

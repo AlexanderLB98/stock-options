@@ -3,6 +3,9 @@ from datetime import datetime, date
 import gymnasium as gym
 from gymnasium import spaces
 
+import numpy as np
+from scipy.stats import norm
+
 # from gym_trading_env.blackScholes import blackScholesCall, blackScholesPut
 
 
@@ -15,6 +18,7 @@ class Option:
     days_to_expire: int
     spot_price: float
     premium: float
+    expired: bool = field(default=False)
     value: float = field(default=0.0)
     r: float = field(default=0.01)    # risk-free rate
     sigma: float = field(default=0.2) # volatility
@@ -24,7 +28,9 @@ class Option:
         self.days_to_expire = (self.expiry_date - current_date).days
         if self.days_to_expire <= 0:
             # Option has expired, return intrinsic value (implement as needed)
-            return 0.0
+            self.expired = True
+            self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
+            return self.value
         if self.option_type == "call":
             self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
         elif self.option_type == "put":
