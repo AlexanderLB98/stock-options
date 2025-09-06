@@ -230,7 +230,7 @@ class TradingEnv(gym.Env):
 
     def get_portfolio_value(self):
         """ Calculates and return the current portfolio value. """
-        pass
+        return self.state.portfolio_value
 
     def update_options(self) -> list[Option]:
         """ Update the available options based on the current date and price. 
@@ -335,21 +335,24 @@ class TradingEnv(gym.Env):
     def _get_obs(self):
         """"
         The observation is a subset from the state with the information from:
+        - Current cash
+        - Current portfolio value
         - features from current date
         - N last closes (N = window_size)
         - options available: for each option (self.n_options), 4 features: type (call/put), strike, premium, days_to_expiry
         - owned options: for each option, 4 features: type (call/put), strike, premium, days_to_expiry
 
-        Shape expected: (73,) with this configuration.
+        Shape expected: (75,) with this configuration.
+            2 (Cash, portfolio_value)
             5 (open, high, low, close, volume) 
             10 (last_closes) + 10 (last_volumes)         (window_size=10) 
             40 (10 options * 4 features)                 (self.n_options=10)
             8 (2 owned options * 4 features)             (self.max_options=2)
-                = 73
+                = 75
 
             Dynamically, the shape is:
-                5 + 2*window_size  + (self.n_options * 4) + (self.max_options * 4)   
-                5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
+                2 + 5 + 2*window_size  + (self.n_options * 4) + (self.max_options * 4)   
+                2 + 5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
                 
             Returns: dict: The observation dictionary.
         """""
@@ -358,8 +361,14 @@ class TradingEnv(gym.Env):
         K = self.max_options # max possible owned options
    
         # Expected shape: 5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
-        expected_shape = 5 + 2*N + 4*(M + K)
+        expected_shape = 2 + 5 + 2*N + 4*(M + K)
         logger.info(f"Expected observation shape: {expected_shape}")
+
+        # --- 0. Current state for cash and portfolio value ---
+        portfolio = {
+            "cash": float(self.state.cash),
+            "portfolio_value": float(self.state.portfolio_value)
+        }
 
         # --- 1. Current state for today ---
         row = self.df[self.state.current_step]
@@ -418,6 +427,7 @@ class TradingEnv(gym.Env):
         assert owned_options.shape == (K, 4), f"owned_options shape mismatch: {owned_options.shape} vs {(K, 4)}"
 
         obs = {
+            "portfolio": portfolio,
             "today": today,
             "last_closes": closes,
             "last_volumes": volumes,
@@ -511,7 +521,7 @@ if __name__ == "__main__":
     observation, info = env.reset()
     logger.info("Environment reset. Performing initial state assertions.")
     # Assertions on the very first state after reset
-    expected_flat_obs_shape = 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
+    expected_flat_obs_shape = 2 + 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
     assert len(flatten_obs(observation)) == expected_flat_obs_shape, f"Initial flattened observation shape mismatch: {len(flatten_obs(observation))} vs {expected_flat_obs_shape}"
     assert info.current_step == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
     assert info.cash == env.portfolio_initial_value, f"Initial cash should be {env.portfolio_initial_value}, got {info.cash}"
