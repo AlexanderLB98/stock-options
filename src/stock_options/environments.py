@@ -191,30 +191,73 @@ class TradingEnv(gym.Env):
     def perform_action(self, actions):
         """ Perform the given action in the environment. Buy/Sell/Do nothing with options.
         ACtion could be a discrete list with len of available options, 0 to do nothing, 1 to buy n option and -1 to sell n option.
-        """
-        
-        # Loop over all the options to perform the action
-        for i, action in enumerate(actions):
-            
-            logger.info(f"action[{i}] = {action}")
-            if i < self.n_options and i < len(self.state.options_available):
-                # Also checks if there are available options
-                logger.info("Action on available options: buy or do nothing")
-            
-                option = self.state.options_available[i]
-                if action == 1:
-                    logger.info(f"Buying option {option}")
-                    # self.portfolio.buy_option(option)
-                elif action == 0:
-                    logger.info("Doing nothing")
-            elif i >= self.n_options:
-                logger.info("Action on owned options: sell or do nothing")
-                n_owned = i - self.n_options
-                logger.info(f"n_owned = {n_owned}")
-                if action == 1 and n_owned < len(self.state.owned_options):
-                    logger.info(f"Selling owned option {self.state.owned_options[n_owned]}")
-                    # self.portfolio.sell_option(self.state.owned_options[n_owned])
 
+        The `actions` parameter is an array where elements are partitioned:
+        - First `self.n_options` elements: Actions for options available in the market (0=No-op, 1=Buy).
+        - Next `self.max_options` elements: Actions for options currently held in the portfolio (0=No-op, 1=Sell).
+
+        """
+        logger.info(f"Actions received: {actions}")
+        assert len(actions) == self.n_options + self.max_options, f"Action length {len(actions)} does not match expected {self.n_options + self.max_options}"
+        self._perform_for_available_options(actions[:self.n_options]) # Give actions for available options (first n_options elements)
+        self._perform_for_owned_options(actions[-self.max_options:]) # Give actions for owned options (last max_options elements)
+
+    def _perform_for_available_options(self, actions):
+        """ Perform actions related to available options (buy or do nothing).
+            Actions for available options are in the first self.n_options elements of the actions array.
+
+            If action is 1, will instantiate the option. If no option in that index, just skip
+        """
+        logger.info(f"Performing actions: {actions}")
+        for i, action in enumerate(actions):
+            logger.info(f"action[{i}] = {action}")
+            if action == 0:
+                # Do nothing
+                pass
+            elif action == 1:
+                # Case of buting an available option
+                logger.info("Buying option")
+                try:
+                    # Check if there is an available option at index i
+                    option = self.state.options_available[i]
+                    # self.portfolio.buy_option(option)
+                    # Update the portfolio and state
+                except IndexError:
+                    logger.info(f"No available option at index {i}, cannot buy.")
+                pass
+            else:
+                # Invalid action
+                logger.warning(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (buy).")
+                pass
+
+    def _perform_for_owned_options(self, actions):
+        """ Perform actions related to owned options (sell or do nothing).
+            Actions for owned options are in the last self.max_options elements of the actions array.
+
+            If action is 1, will instantiate the option. If no option in that index, just skip
+        """
+        logger.info(f"Performing actions: {actions}")
+        for i, action in enumerate(actions):
+            logger.info(f"action[{i}] = {action}")
+            if action == 0:
+                # Do nothing
+                pass
+            elif action == 1:
+                # Case of buting an available option
+                logger.info("selling option")
+                try:
+                    # Check if there is an available option at index i
+                    option = self.state.owned_options[i]
+                    # self.portfolios.sell_option(option)
+                    # Update the portfolio and state
+                except IndexError:
+                    logger.info(f"No available option at index {i}, cannot sell.")
+                pass
+            else:
+                # Invalid action
+                logger.warning(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (sell).")
+                pass
+        
     
     def get_reward(self):
         """ Calculate the reward for the current step
