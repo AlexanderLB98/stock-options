@@ -6,6 +6,7 @@ import calendar
 
 import pandas as pd
 
+from stock_options.options import Option  # Make sure this import is correct
 
 def blackScholesCall(S, K, T, r, sigma, q=0):
     """
@@ -61,7 +62,7 @@ def blackScholesPut(S, K, T, r, sigma, q=0):
 
 def gen_option_for_date(current_date: date, option_type: str, spot_price: float, 
                         num_strikes: int, strike_step_pct: float, n_months: int,
-                        sigma: float = 0.2):
+                        sigma: float = 0.2) -> list[Option]:
     """
     Generate a list of call or put options for future expiry dates.
 
@@ -75,15 +76,20 @@ def gen_option_for_date(current_date: date, option_type: str, spot_price: float,
     - sigma (float): Asset anual volatily. Default 20%.
 
     Returns:
-    - List[dict]: List of option contracts
+    - List[Option]: List of option contracts
     """
     expiries = get_third_fridays(n_months=n_months, start_date=current_date)
     strike_step = round(spot_price * strike_step_pct, 2)
 
-    strikes = [
-        round(spot_price + i * strike_step, 2)
-        for i in range(-num_strikes, num_strikes + 1)
-    ]
+    # strikes = [
+    #     round(spot_price + i * strike_step, 2)
+    #     for i in range(-num_strikes, num_strikes + 1)
+    # ]
+    strikes = gen_even_int_strikes(spot_price, num_strikes)
+
+    # REFACTOR
+    r = 0.1
+    
 
     options = []
     for expiry in expiries:
@@ -97,17 +103,29 @@ def gen_option_for_date(current_date: date, option_type: str, spot_price: float,
             else:
                 raise ValueError("option_type must be 'call' or 'put'")
 
-            option = {
-                "type": option_type.lower(),
-                "strike": strike,
-                "expiry_date": expiry,
-                "days_to_expiry": days_to_expiry,
-                "spot_price": spot_price,
-                "premium": round(premium, 4)
-            }
+            option = Option(
+                option_type=option_type.lower(),
+                strike=strike,
+                date_generated=current_date,
+                expiry_date=expiry,
+                days_to_expire=days_to_expiry,
+                spot_price=spot_price,
+                premium=round(premium, 4)
+            )
             options.append(option)
 
     return options
+
+def gen_even_int_strikes(spot_price, num_strikes):
+    """ 
+    Generate a list of int even numbers around a given spot price
+    """ 
+    # Round the spot_price to nearest even integer
+    nearest_even = int(round(spot_price / 2.0) * 2)
+
+    # Generate strikes around it
+    strikes = [nearest_even + 2 * i for i in range(-num_strikes, num_strikes + 1)]
+    return strikes
 
 def get_third_fridays(n_months: int, start_date: date = None):
     """
@@ -122,7 +140,7 @@ def get_third_fridays(n_months: int, start_date: date = None):
     - List[date]: List of third Fridays as datetime.date objects.
     """
     if start_date is None:
-        start_date = date.today()
+        start_date = datetime.today()
 
     third_fridays = []
     year = start_date.year
@@ -137,7 +155,7 @@ def get_third_fridays(n_months: int, start_date: date = None):
         else:
             third_friday = month_cal[3][calendar.FRIDAY]
 
-        third_fridays.append(date(year, month, third_friday))
+        third_fridays.append(datetime(year, month, third_friday))
 
         # Increment month/year
         month += 1
@@ -176,7 +194,7 @@ if __name__ == "__main__":
         option_type='call',
         spot_price=100.0,
         num_strikes=2,
-        strike_step_pct=0.05,  # 5%
+        strike_step_pct=0.1,  # 5%
         n_months=3
         )
     options_put = gen_option_for_date(
@@ -184,7 +202,7 @@ if __name__ == "__main__":
         option_type='put',
         spot_price=100.0,
         num_strikes=2,
-        strike_step_pct=0.05,  # 5%
+        strike_step_pct=0.2,  # 5%
         n_months=3
         )
 
