@@ -173,7 +173,7 @@ class TradingEnv(gym.Env):
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
 
-        # self.state.portfolio_value = self.get_portfolio_value()
+        self.state.portfolio.portfolio_value = self.get_portfolio_value()
         # Get list of available options for the current date
         self.state.options_available = self.update_options()
         
@@ -276,9 +276,10 @@ class TradingEnv(gym.Env):
         
         return reward
 
-    def get_portfolio_value(self):
-        """ Calculates and return the current portfolio value. """
-        # return self.state.portfolio_value # PLACEHOLDER
+    def get_portfolio_value(self) -> float:
+        """ Calculates and return the current portfolio value. 
+        Is used to update the state.portfolio.portfolio_value attribute inside the portfolio object, which is part of the state.
+        """
         return self.state.portfolio.get_current_total_value(self.state.current_price, self.state.current_date)
 
     def update_options(self) -> list[Option]:
