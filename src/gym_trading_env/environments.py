@@ -12,6 +12,7 @@ from collections import Counter
 from gymnasium.spaces import Dict, Box, Discrete
 from gymnasium.wrappers import FlattenObservation
 
+from gym_trading_env.options import Option
 from gym_trading_env.stateManagement import initialize_state
 from gym_trading_env.utils.portfolio import Portfolio, TargetPortfolio
 from gym_trading_env.utils.history import History
@@ -19,7 +20,7 @@ from gym_trading_env.utils.optionsPortfolio import OptionsPortfolio
 
 from gym_trading_env.blackScholes import gen_option_for_date
 # from src.options import define_action_space, Option
-from gym_trading_env.options import define_action_space, Option
+from gym_trading_env.options import define_action_space
 
 # from datetime import datetime, date
 
@@ -27,27 +28,56 @@ import tempfile, os
 import warnings
 warnings.filterwarnings("error")
 
-def basic_reward_function(history : History):
-    return np.log(history["portfolio_valuation", -1] / history["portfolio_valuation", -2])
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    force=True # Overwrite any existing logging configuration
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 
 class TradingEnv(gym.Env):
     """
     A trading environment for OpenAI gymnasium to trade stocks with options.
+    
+    This environment follows the standard `gymnasium.Env` interface. At each step, the agent
+    receives an observation of the market and its portfolio and must take an action
+    related to buying or selling options. The goal is to maximize the portfolio's value TBD.
+
+    Attributes:
+        df (pl.DataFrame): The DataFrame containing all historical market data.
+        action_space (gym.spaces.Space): The space of actions the agent can take.
+        observation_space (gym.spaces.Dict): The structure of the observation space.
+        state: A state object (e.g., a dataclass) containing the full internal state of the environment.
+        portfolio (OptionsPortfolio): The object that manages cash and owned options.
+    
+        self.n_options : int : The number of available options at each step. Depends on n_strikes and n_months.
 
     inputs:
-    - df : pandas.DataFrame : A dataframe containing the historical price data and features. It must contain a 'close' column and feature columns (with 'feature' in their name).
+    - df : polars.DataFrame : A dataframe containing the historical price data and features. It must contain a 'close' column and feature columns (with 'feature' in their name).
     - reward_function : function : A function that takes the historical info (History object) and returns a reward (float). Default is basic_reward_function.
     - portfolio_initial_value : float : The initial value of the portfolio. Default is 1000.
     - max_options : int : The maximum number of options that can be owned at once. Default is 2.
     - n_strikes : int : The number of strikes above and below the spot price. Default is 2.
     - n_months : int : The number of months to consider for options. Default is 1.
     - strike_step_pct : float : The step percentage for strikes. Default is 0.1 (10%).
-    
+
+    On every step, the environment:
+        - Performs the action (buy/sell/hold options)
+        - update the state (current step, date, price, available options)
+        - update porfolio value
+        - get reward
+        - log/history
+        - get observation
+        - get info
     """
+
     def __init__(self,
                 df : pl.DataFrame,
-                reward_function = basic_reward_function,
+                reward_function = None,
                 portfolio_initial_value = 1000,
                 window_size = 0,
                 max_options = 2,
@@ -75,7 +105,7 @@ class TradingEnv(gym.Env):
         self.reset()
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
-        """Start a new episode.
+        """Start a new episode. Initialize the state and generate options for the first date.
 
         Args:
             seed: Random seed for reproducible episodes
@@ -88,12 +118,15 @@ class TradingEnv(gym.Env):
         super().reset(seed=seed)
         
         self._initialize_state()
-        self.state.current_date = self.df[0, "date"]
-        self.state.current_price = self.df[0, "close"]
+        self.state.current_date = self.df[self.state.current_step, "date"]
+        self.state.current_price = self.df[self.state.current_step, "close"]
+        
         # Get list of available options for the current date
-        self.update_options()
+        self.state.options_available = self.update_options()
         observation = self._get_obs()
+        logger.info(f"Initial observation: {observation}")
         info = self._get_info()
+        logger.info(f"Initial info: {info}")
         return observation, info
 
     def render(self):
@@ -119,12 +152,13 @@ class TradingEnv(gym.Env):
         self.perform_action(action)
 
         self.state.current_step += 1
+        logger.info(f"Current step: {self.state.current_step}")
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
 
         self.state.portfolio_value = self.get_portfolio_value()
         # Get list of available options for the current date
-        self.update_options()
+        self.state.options_available = self.update_options()
         
         observation = self._get_obs()
         info = self._get_info()
@@ -135,7 +169,7 @@ class TradingEnv(gym.Env):
         if self.state.current_step >= len(self.df) - 1:
             truncated = True
         
-        return obs, reward, terminated, truncated, info
+        return observation, reward, terminated, truncated, info
 
     def perform_action(self, actions):
         """ Perform the given action in the environment. Buy/Sell/Do nothing with options.
@@ -144,20 +178,25 @@ class TradingEnv(gym.Env):
         
         # Loop over all the options to perform the action
         for i, action in enumerate(actions):
-            print(f"action[{i}] = {action}")
-            if i < self.n_options:
-                print("Action on available options: buy or do nothing")
+            
+            logger.info(f"action[{i}] = {action}")
+            if i < self.n_options and i < len(self.state.options_available):
+                # Also checks if there are available options
+                logger.info("Action on available options: buy or do nothing")
+            
                 option = self.state.options_available[i]
                 if action == 1:
-                    print(f"Buying option {option}")
+                    logger.info(f"Buying option {option}")
                     # self.portfolio.buy_option(option)
                 elif action == 0:
-                    print("Doing nothing")
-            else:
-                print("Action on owned options: sell or do nothing")
+                    logger.info("Doing nothing")
+            elif i >= self.n_options:
+                logger.info("Action on owned options: sell or do nothing")
                 n_owned = i - self.n_options
-                print(f"n_owned = {n_owned}")
-                 
+                logger.info(f"n_owned = {n_owned}")
+                if action == 1 and n_owned < len(self.state.owned_options):
+                    logger.info(f"Selling owned option {self.state.owned_options[n_owned]}")
+                    # self.portfolio.sell_option(self.state.owned_options[n_owned])
         return 0
     
     def get_reward(self):
@@ -168,8 +207,22 @@ class TradingEnv(gym.Env):
         """ Calculates and return the current portfolio value. """
         pass
 
-    def update_options(self):
-        """ Update the available options based on the current date and price. """
+    def update_options(self) -> list[Option]:
+        """ Update the available options based on the current date and price. 
+        
+        1. Generate options for the current date (calls and puts)
+        2. Add them to the existing options list
+        3. Remove expired options
+        4. Keep only unique options (by type, strike, expiry date)
+        5. Sort options by date generated (newest first)
+        6. Select the top N options to be available. Not more than self.max_options can be in that list.
+
+        Currently, this list is not always full.
+
+        Returns:
+            list[Option]: A list of available options for the current date.
+        """
+
         # Option implementation
         options_call = gen_option_for_date(
                                         current_date=self.state.current_date,
@@ -188,30 +241,47 @@ class TradingEnv(gym.Env):
                                         n_months=self.n_months
                                     )
 
-        call_df = pl.DataFrame(options_call)
-        put_df = pl.DataFrame(options_put)
-        # options_df = pl.DataFrame(options)
-        options = pl.concat([self.options, call_df, put_df], how="vertical")
-        options = options.sort("current_date", descending=True)  # Sort by current_date descending
-        # Delete expired options
-        options = options.filter(pl.col("expiry_date") >= self.state.current_date)
-        options = options.slice(0, self.n_options)  # Limit to n_options
-        self.state.options_available = options.unique(subset=["type", "strike", "expiry_date"], maintain_order=True)
+        self.options = self.options + options_call + options_put
+        self.options = sorted(self.options, key=lambda opt: opt.date_generated, reverse=True)
+        self.options = [opt for opt in self.options if opt.expiry_date >= self.state.current_date]
 
+        seen = set()
+        unique_options = []
+        for opt in self.options:
+            key = (opt.option_type, opt.strike, opt.expiry_date)
+            if key not in seen:
+                unique_options.append(opt)
+                seen.add(key)
 
+        # self.state.options_available = unique_options[:self.n_options]
+        options_available = unique_options[:self.n_options]
+        logger.info(f"Current step: {self.state.current_step}")
+        logger.info(f"Current date: {self.state.current_date}")
+        logger.info(f"Number of generated options: {len(self.options)}")
+        logger.info(f"Numero de opciones disponibles unicas: {len(self.state.options_available)}")
+        return options_available
+    
     def update_history(self):
         pass
 
     def _initialize_options_parameters(self, max_options, n_strikes, n_months, strike_step_pct):
-        # self.options = pl.DataFrame()
-        self.options = pl.DataFrame()
+        """ 
+        Initialize the parameters related to options trading.
+        - max_options : int : max options you can own at once
+        - n_strikes : int : number of strikes above and below the spot price
+        - n_months : int : number of months to consider for options
+        - strike_step_pct : float : step percentage for strikes
+        - n_options : int : Number of available options. 2 for call and put options
+        """
+
+        self.options = []
         self.max_options = max_options  # max options you can own at once
         self.owned_options = [] 
         self.n_owned_options = len(self.owned_options)  # number of owned options
         self.n_strikes = n_strikes  # number of strikes above and below the spot price
         self.n_months = n_months
         self.strike_step_pct = strike_step_pct  # step percentage for strikes
-        self.n_options = (self.n_strikes * 2 + 1) * self.n_months * 2  # 2 for call and put options
+        self.n_options = (self.n_strikes * 2 + 1) * self.n_months * 2  # Number of available options. 2 for call and put options
  
     def _initialize_state(self):
         """ Initialize the state of the environment using the dataclass.
@@ -229,19 +299,35 @@ class TradingEnv(gym.Env):
         """
         self.state = initialize_state(current_step = self.window_size, initial_cash = self.portfolio_initial_value)
 
-
     def _get_obs(self):
         """"
         The observation is a subset from the state with the information from:
         - features from current date
         - N last closes (N = window_size)
-        - options available: for each option, 4 features: type (call/put), strike, premium, days_to_expiry
+        - options available: for each option (self.n_options), 4 features: type (call/put), strike, premium, days_to_expiry
         - owned options: for each option, 4 features: type (call/put), strike, premium, days_to_expiry
+
+        Shape expected: (73,) with this configuration.
+            5 (open, high, low, close, volume) 
+            10 (last_closes) + 10 (last_volumes)         (window_size=10) 
+            40 (10 options * 4 features)                 (self.n_options=10)
+            8 (2 owned options * 4 features)             (self.max_options=2)
+                = 73
+
+            Dynamically, the shape is:
+                5 + 2*window_size  + (self.n_options * 4) + (self.max_options * 4)   
+                5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
+                
+            Returns: dict: The observation dictionary.
         """""
         N = self.window_size  # window size for last closes
         M = self.n_options # available options
         K = self.max_options # max possible owned options
    
+        # Expected shape: 5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
+        expected_shape = 5 + 2*N + 4*(M + K)
+        logger.info(f"Expected observation shape: {expected_shape}")
+
         # --- 1. Current state for today ---
         row = self.df[self.state.current_step]
         today = {
@@ -263,18 +349,17 @@ class TradingEnv(gym.Env):
         volumes = np.pad(closes, (N - len(closes), 0), 'constant', constant_values=0)
 
         # --- 3. Available options ---
-        options_df = self.state.options_available
+        options_list = self.state.options_available  # Now a list of Option objects
         type_map = {"call": 0, "put": 1}
         available_options = []
-        options_dicts = options_df.to_dicts()
         for i in range(M):
-            if i < len(options_dicts):
-                opt = options_dicts[i]
+            if i < len(options_list):
+                opt = options_list[i]
                 available_options.append([
-                    type_map.get(opt["type"], -1),
-                    opt["strike"],
-                    opt["premium"],
-                    opt["days_to_expiry"]
+                    type_map.get(opt.option_type, -1),
+                    opt.strike,
+                    opt.premium,
+                    opt.days_to_expire
                 ])
             else:
                 available_options.append([0, 0.0, 0.0, 0.0])
@@ -302,6 +387,10 @@ class TradingEnv(gym.Env):
             "available_options": available_options,
             "owned_options": owned_options
         }
+
+        # Make sure the observation matches the expected shape
+        assert len(flatten_obs(obs)) == expected_shape, f"Observation shape mismatch: got {len(flatten_obs(obs))}, expected {expected_shape}"
+        
         return obs
     
     def _initialize_observation_space(self):
@@ -344,7 +433,7 @@ class TradingEnv(gym.Env):
 def load_data(csv_path):
     """Carga los datos de precios desde un CSV."""
     df = pl.read_csv(csv_path, try_parse_dates=True)
-    print(len(df), "rows loaded from", csv_path)
+    logger.info(len(df), "rows loaded from", csv_path)
     df = df[-1000:]
 
     # Create the features using Polars expressions
@@ -356,41 +445,72 @@ def load_data(csv_path):
     ])
     return df
 
+import numpy as np
+
+def flatten_obs(obs: dict)-> np.ndarray:
+    """ Flatten the observation dictionary into a 1D numpy array. """
+    flat = []
+    for v in obs.values():
+        if isinstance(v, dict):
+            # Flatten nested dicts (e.g., "today")
+            flat.extend(list(v.values()))
+        elif isinstance(v, np.ndarray):
+            flat.extend(v.flatten())
+        else:
+            flat.append(v)
+    return np.array(flat, dtype=np.float32)
 
 if __name__ == "__main__":
     csv_path = "data/PHIA.csv"
 
     df = load_data(csv_path)
 
-    env = TradingEnv(df, window_size=10)
+    env = TradingEnv(df, window_size=10, n_months = 1)
     # env = FlattenObservation(env)
     
-    obs, info = env.reset()
-    print("Initial observation:", obs)
-    print("Initial info:", info)
+    observation, info = env.reset()
+    logger.info("Initial observation:", observation)
+    logger.info("Initial info:", info)
+
+    # Example flatten usage:
+    logger.info("Flattened observation:")
+    flat_obs = flatten_obs(observation)
+    logger.info(flat_obs.shape)
+    logger.info(flat_obs)
 
 
-    print(20*"-")
-    print(f"Observation space shape: {env.observation_space.shape}")
-    print(f"Observation space: {len(obs)}")
-    print(f"Action space shape: {env.action_space}")
-    print(f"Action space sample: {env.action_space.sample()}")
+    logger.info(20*"-")
+    logger.info(f"Observation space shape: {env.observation_space.shape}")
+    logger.info(f"Observation space: {len(observation)}")
+    logger.info(f"Action space shape: {env.action_space}")
+    logger.info(f"Action space sample: {env.action_space.sample()}")
 
 
     done, truncated = False, False
     observation, info = env.reset()
     while not done and not truncated:
-        # Pick a position by its index in your position list (=[-1, 0, 1])....usually something like : position_index = your_policy(observation)
         action = env.action_space.sample() 
         observation, reward, done, truncated, info = env.step(action)
-        print(f"Observation: {observation}")
-        print(f"Reward: {reward}, Done: {done}, Truncated: {truncated}, Info: {info}")
-        print(20*"-")
 
-        print(20*"-")
-        print(f"Observation space shape: {env.observation_space.shape}")
-        print(f"Observation space: {len(obs)}")
-        print(f"Action space shape: {env.action_space}")
-        print(f"Action space sample: {env.action_space.sample()}")
-        print(20*"-")
+        # Example flatten usage: Verify its the corresponding shape:
+        logger.info("Flattened observation:")
+        flat_obs = flatten_obs(observation)
+        logger.info(flat_obs.shape)
+        logger.info(flat_obs)
 
+
+
+        logger.info(f"Observation: {observation}")
+        logger.info(f"Reward: {reward}, Done: {done}, Truncated: {truncated}, Info: {info}")
+        logger.info(20*"-")
+
+        logger.info(20*"-")
+        logger.info(f"Observation space shape: {env.observation_space.shape}")
+        logger.info(f"Observation space: {len(observation)}")
+        logger.info(f"Action space shape: {env.action_space}")
+        logger.info(f"Action space sample: {env.action_space.sample()}")
+        logger.info(f"Number of available options: {len(info.options_available)}")
+        logger.info(20*"-")
+
+        # assert len(flatten_obs(observation)) == 73, "Flattened observation should be shape (73,) with this configuration."
+        logger.info("Flattened observation looks good.")

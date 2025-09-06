@@ -6,6 +6,7 @@ import calendar
 
 import pandas as pd
 
+from gym_trading_env.options import Option  # Make sure this import is correct
 
 def blackScholesCall(S, K, T, r, sigma, q=0):
     """
@@ -61,7 +62,7 @@ def blackScholesPut(S, K, T, r, sigma, q=0):
 
 def gen_option_for_date(current_date: date, option_type: str, spot_price: float, 
                         num_strikes: int, strike_step_pct: float, n_months: int,
-                        sigma: float = 0.2):
+                        sigma: float = 0.2) -> list[Option]:
     """
     Generate a list of call or put options for future expiry dates.
 
@@ -75,7 +76,7 @@ def gen_option_for_date(current_date: date, option_type: str, spot_price: float,
     - sigma (float): Asset anual volatily. Default 20%.
 
     Returns:
-    - List[dict]: List of option contracts
+    - List[Option]: List of option contracts
     """
     expiries = get_third_fridays(n_months=n_months, start_date=current_date)
     strike_step = round(spot_price * strike_step_pct, 2)
@@ -102,15 +103,15 @@ def gen_option_for_date(current_date: date, option_type: str, spot_price: float,
             else:
                 raise ValueError("option_type must be 'call' or 'put'")
 
-            option = {
-                "type": option_type.lower(),
-                "strike": strike,
-                "current_date": current_date,
-                "expiry_date": expiry,
-                "days_to_expiry": days_to_expiry,
-                "spot_price": spot_price,
-                "premium": round(premium, 4)
-            }
+            option = Option(
+                option_type=option_type.lower(),
+                strike=strike,
+                date_generated=current_date,
+                expiry_date=expiry,
+                days_to_expire=days_to_expiry,
+                spot_price=spot_price,
+                premium=round(premium, 4)
+            )
             options.append(option)
 
     return options

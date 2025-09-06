@@ -1,3 +1,6 @@
+from gym_trading_env.options import Option
+
+
 RENDER = False
 
 class OptionsPortfolio:
@@ -9,7 +12,7 @@ class OptionsPortfolio:
         self.max_options = max_options
         self.owned_options = [None] * max_options  # Each slot can hold an Option or None
 
-    def buy_option(self, option):
+    def buy_option(self, option: Option):
         """
         Buy an option if there is space and enough cash.
         """

@@ -1,9 +1,44 @@
+from dataclasses import dataclass, field
+import datetime
+
 import gymnasium as gym
 from gymnasium import spaces
 
-from .blackScholes import blackScholesCall, blackScholesPut
+# from .blackScholes import blackScholesCall, blackScholesPut
 
+
+@dataclass
 class Option:
+    option_type: str  # "call" or "put"
+    strike: float
+    date_generated: datetime.date
+    expiry_date: datetime.date
+    days_to_expire: int
+    spot_price: float
+    premium: float
+    value: float = field(default=0.0)
+    r: float = field(default=0.01)    # risk-free rate
+    sigma: float = field(default=0.2) # volatility
+    q: float = field(default=0.0)     # dividend yield
+
+    # def evaluate_option(self, current_price, current_date):
+    #     self.days_to_expire = (self.expiry_date - current_date).days
+    #     if self.days_to_expire <= 0:
+    #         # Option has expired, return intrinsic value (implement as needed)
+    #         return 0.0
+    #     if self.option_type == "call":
+    #         self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
+    #     elif self.option_type == "put":
+    #         self.value = blackScholesPut(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
+    #     return self.value
+
+    def __repr__(self):
+        return (f"Option(type={self.option_type}, strike={self.strike}, "
+                f"expiry={self.expiry_date}, premium={self.premium}, generated on={self.date_generated})")
+
+
+
+class Option_old:
     def __init__(self, option_type, strike, date_generated, expiry_date, days_to_expire, spot_price, premium):
         self.option_type = option_type
         self.strike = strike
