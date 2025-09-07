@@ -14,9 +14,9 @@ from gymnasium.wrappers import FlattenObservation
 
 from stock_options.options import Option
 from stock_options.stateManagement import initialize_state, State
-from stock_options.utils.portfolio import Portfolio, TargetPortfolio
 from stock_options.utils.history import History
-from stock_options.utils.optionsPortfolio import OptionsPortfolio
+from stock_options.utils.data import load_data, flatten_obs
+from stock_options.optionsPortfolio import OptionsPortfolio
 
 from stock_options.blackScholes import gen_option_for_date
 # from src.options import define_action_space, Option
@@ -476,14 +476,32 @@ class TradingEnv(gym.Env):
         owned_options = np.array(owned_options, dtype=np.float32)
         assert owned_options.shape == (K, 4), f"owned_options shape mismatch: {owned_options.shape} vs {(K, 4)}"
 
+        # obs = {
+        #     "portfolio": portfolio,
+        #     "today": today,
+        #     "last_closes": closes,
+        #     "last_volumes": volumes,
+        #     "available_options": available_options,
+        #     "owned_options": owned_options
+        # }
         obs = {
-            "portfolio": portfolio,
-            "today": today,
-            "last_closes": closes,
-            "last_volumes": volumes,
-            "available_options": available_options,
-            "owned_options": owned_options
+            "cash": np.array([self.state.portfolio.cash], dtype=np.float32),
+            "portfolio_value": np.array([self.state.portfolio.portfolio_value], dtype=np.float32),
+            "value_diff": np.array([self.state.portfolio.value_diff], dtype=np.float32),
+            "total_value_diff": np.array([self.state.portfolio.total_value_diff], dtype=np.float32),
+
+            "open": np.array([today["open"]], dtype=np.float32),
+            "close": np.array([today["close"]], dtype=np.float32),
+            "low": np.array([today["low"]], dtype=np.float32),
+            "high": np.array([today["high"]], dtype=np.float32),
+            "volume": np.array([today["volume"]], dtype=np.float32),
+
+            "last_closes": closes.astype(np.float32),
+            "last_volumes": volumes.astype(np.float32),
+            "available_options": available_options.astype(np.float32).flatten(),
+            "owned_options": owned_options.astype(np.float32).flatten(),
         }
+
 
         # Make sure the observation matches the expected shape
         assert len(flatten_obs(obs)) == expected_shape, f"Observation shape mismatch: got {len(flatten_obs(obs))}, expected {expected_shape}"
@@ -513,59 +531,51 @@ class TradingEnv(gym.Env):
 
         logger.info(f"Observation space initialized with N={N}, M={M} (n_options), K={K} (max_options)")
         
+        # self.observation_space = Dict({
+        #     "portfolio": Dict({
+        #         "cash": Box(low=0, high=np.inf, shape=(), dtype=np.float32),
+        #         "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
+        #         "value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
+        #         "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32)
+        #     }),
+        #     "today": Dict({
+        #         "open": Box(-np.inf, np.inf, shape=()),
+        #         "close": Box(-np.inf, np.inf, shape=()),
+        #         "low": Box(-np.inf, np.inf, shape=()),
+        #         "high": Box(-np.inf, np.inf, shape=()),
+        #         "volume": Box(-np.inf, np.inf, shape=()),
+        #     }),
+        #     "last_closes": Box(-np.inf, np.inf, shape=(N,)),
+        #     "last_volumes": Box(-np.inf, np.inf, shape=(N,)),
+        #     "available_options": Box(-np.inf, np.inf, shape=(M, 4)),
+        #     "owned_options": Box(-np.inf, np.inf, shape=(K, 4)),
+        # })
         self.observation_space = Dict({
-            "portfolio": Dict({
-                "cash": Box(low=0, high=np.inf, shape=(), dtype=np.float32),
-                "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
-                "value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
-                "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32)
-            }),
-            "today": Dict({
-                "open": Box(-np.inf, np.inf, shape=()),
-                "close": Box(-np.inf, np.inf, shape=()),
-                "low": Box(-np.inf, np.inf, shape=()),
-                "high": Box(-np.inf, np.inf, shape=()),
-                "volume": Box(-np.inf, np.inf, shape=()),
-            }),
-            "last_closes": Box(-np.inf, np.inf, shape=(N,)),
-            "last_volumes": Box(-np.inf, np.inf, shape=(N,)),
-            "available_options": Box(-np.inf, np.inf, shape=(M, 4)),
-            "owned_options": Box(-np.inf, np.inf, shape=(K, 4)),
+            # Portfolio
+            "cash": Box(low=0, high=np.inf, shape=(1, ), dtype=np.float32),
+            "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
+            "value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
+            "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
+
+            # Today
+            "open": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+            "close": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+            "low": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+            "high": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+            "volume": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+
+            # Time series + options
+            "last_closes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
+            "last_volumes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
+            "available_options": Box(-np.inf, np.inf, shape=(M * 4, ), dtype=np.float32),
+            "owned_options": Box(-np.inf, np.inf, shape=(K * 4, ), dtype=np.float32),
         })
+
         logger.debug(f"Full observation space definition: {self.observation_space}")
 
     def _get_info(self):
-        return self.state
-  
-
-def load_data(csv_path):
-    """Carga los datos de precios desde un CSV."""
-    df = pl.read_csv(csv_path, try_parse_dates=True)
-    logger.info(len(df), "rows loaded from", csv_path)
-    df = df[-1000:]
-
-    # Create the features using Polars expressions
-    df = df.with_columns([
-        (pl.col("close").pct_change()).alias("feature_close"),
-        (pl.col("open") / pl.col("close")).alias("feature_open"),
-        (pl.col("high") / pl.col("close")).alias("feature_high"),
-        (pl.col("low") / pl.col("close")).alias("feature_low"),
-    ])
-    return df
-
-
-def flatten_obs(obs: dict)-> np.ndarray:
-    """ Flatten the observation dictionary into a 1D numpy array. """
-    flat = []
-    for v in obs.values():
-        if isinstance(v, dict):
-            # Flatten nested dicts (e.g., "today")
-            flat.extend(list(v.values()))
-        elif isinstance(v, np.ndarray):
-            flat.extend(v.flatten())
-        else:
-            flat.append(v)
-    return np.array(flat, dtype=np.float32)
+        from dataclasses import asdict
+        return asdict(self.state)
 
 
 if __name__ == "__main__":
@@ -575,16 +585,22 @@ if __name__ == "__main__":
     logger.info("Initializing environment for basic test...")
     env = TradingEnv(df, window_size=10, n_months=1) # Use a basic reward
 
+    # Check env for SB3 compatibility
+    from stable_baselines3.common.env_checker import check_env
+    # A chuparla el check_env, me obliga a hacer que info sea un dict en lugar de State
+    # Bueno parece que para usar SB3 es necesario, asi que lo hago
+    check_env(env, warn=True, skip_render_check=True)
+
     # --- Initial State Check ---
     observation, info = env.reset()
     logger.info("Environment reset. Performing initial state assertions.")
     # Assertions on the very first state after reset
     expected_flat_obs_shape = 4 + 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
     assert len(flatten_obs(observation)) == expected_flat_obs_shape, f"Initial flattened observation shape mismatch: {len(flatten_obs(observation))} vs {expected_flat_obs_shape}"
-    assert info.current_step == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
-    assert info.portfolio.cash == env.initial_cash, f"Initial cash should be {env.initial_cash}, got {info.portfolio.cash}"
-    assert info.portfolio.portfolio_value == env.initial_cash, f"Initial portfolio value should be {env.initial_cash}, got {info.portfolio.portfolio_value}"
-    assert len(info.options_available) <= env.n_options, f"Initial reset: Too many available options: {len(info.options_available)} > {env.n_options}"
+    assert info["current_step"] == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
+    assert info["portfolio"].cash == env.initial_cash, f"Initial cash should be {env.initial_cash}, got {info["portfolio"].cash}"
+    assert info["portfolio"].portfolio_value == env.initial_cash, f"Initial portfolio value should be {env.initial_cash}, got {info["portfolio"].portfolio_value}"
+    assert len(info["options_available"]) <= env.n_options, f"Initial reset: Too many available options: {len(info["options_available"])} > {env.n_options}"
     logger.info("Initial state assertions passed.")
     logger.debug(f"Initial observation: {observation}")
     logger.debug(f"Initial info: {info}")
@@ -616,11 +632,11 @@ if __name__ == "__main__":
         assert len(flat_obs) == expected_flat_obs_shape, f"Step {info.current_step}: Flattened observation shape mismatch: {len(flat_obs)} vs {expected_flat_obs_shape}"
 
         # High-level checks for critical external state
-        assert info.portfolio.portfolio_value >= 0, f"Step {info.current_step}: Portfolio value became negative: {info.portfolio.portfolio_value}"
-        assert info.portfolio.cash >= 0, f"Step {info.current_step}: Cash became negative: {info.portfolio.cash}"
-        assert len(info.options_available) <= env.n_options, f"Step {info.current_step}: Too many available options: {len(info.options_available)} > {env.n_options}"
+        assert info["portfolio"].portfolio_value >= 0, f"Step {info.current_step}: Portfolio value became negative: {info.portfolio.portfolio_value}"
+        assert info["portfolio"].cash >= 0, f"Step {info["current_step"]}: Cash became negative: {info["portfolio"].cash}"
+        assert len(info["options_available"]) <= env.n_options, f"Step {info["current_step"]}: Too many available options: {len(info["options_available"])} > {env.n_options}"
         
-        logger.info(f"Step {info.current_step}: Reward={reward:.4f}, Portfolio={info.portfolio.portfolio_value:.2f}, Cash={info.portfolio.cash:.2f}, Available Options={len(info.options_available)}")
+        logger.info(f"Step {info["current_step"]}: Reward={reward:.4f}, Portfolio={info["portfolio"].portfolio_value:.2f}, Cash={info["portfolio"].cash:.2f}, Available Options={len(info["options_available"])}")
         logger.debug(f"Obs: {observation}") # Use debug for full observation, info
 
         current_test_step += 1
@@ -629,8 +645,8 @@ if __name__ == "__main__":
     logger.info("Episode loop test finished.")
     logger.info(f"Total steps taken in test: {current_test_step}")
     logger.info(f"Total episode reward: {sum(episode_rewards):.4f}")
-    logger.info(f"Final portfolio value: {info.portfolio.portfolio_value:.2f}")
-    logger.info(f"Final portfolio diff: {info.portfolio.total_value_diff:.2f}")
+    logger.info(f"Final portfolio value: {info["portfolio"].portfolio_value:.2f}")
+    logger.info(f"Final portfolio diff: {info["portfolio"].total_value_diff:.2f}")
 
     # Final assert after loop
     assert done or truncated, "Episode loop terminated unexpectedly."
