@@ -12,6 +12,7 @@ polars = ">=1.3.0"
 gymnasium = "*"   
 numpy = "*"       
 scipy = "^1.16.1"
+tensorboard = "^2.20.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0" # For testing

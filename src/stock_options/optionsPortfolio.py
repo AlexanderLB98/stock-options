@@ -76,7 +76,7 @@ class OptionsPortfolio:
             if opt is not None:
                 option_value = opt.evaluate_option(price, date)
                 if opt.expired:
-                    print(f"Option at slot {i} has expired and is being removed from portfolio.")
+                    logger.info(f"Option at slot {i} has expired and is being removed from portfolio.")
                     self.owned_options[i] = None
                     self.cash += option_value
                 total_value += option_value # opt.value

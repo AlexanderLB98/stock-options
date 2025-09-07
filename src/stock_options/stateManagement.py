@@ -3,7 +3,7 @@ from typing import TypedDict, Optional, List
 import polars as pl
 import datetime
 from stock_options.options import Option
-from stock_options.utils.optionsPortfolio import OptionsPortfolio
+from stock_options.optionsPortfolio import OptionsPortfolio
 
 @dataclass
 class State:

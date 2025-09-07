@@ -2,7 +2,7 @@ import pytest
 from datetime import date
 # Make sure to import your OptionsPortfolio class correctly
 # If your file is named portfolio.py, this will work:
-from stock_options.utils.optionsPortfolio import OptionsPortfolio 
+from stock_options.optionsPortfolio import OptionsPortfolio 
 # If your provided code is in a file named, for example, `my_portfolio_classes.py`,
 # you would change the import to: from my_portfolio_classes import OptionsPortfolio
 
