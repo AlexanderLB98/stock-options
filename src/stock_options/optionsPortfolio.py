@@ -27,13 +27,14 @@ class OptionsPortfolio:
 
     def buy_option(self, option: Option):
         """
-        Buy an option if there is space and enough cash.
+        Buy an option if there is space and enough cash. Long Position
         """
         if self.cash < option.premium:
             logger.info("Not enough cash to buy option.")
             return False
         for i in range(self.max_options):
             if self.owned_options[i] is None:
+                option.position = "long"
                 self.owned_options[i] = option
                 self.cash -= option.premium
                 logger.info(f"Bought option: {option}")
@@ -41,16 +42,41 @@ class OptionsPortfolio:
         logger.info("No slot available to buy more options.")
         return False
 
-    def sell_option(self, index, current_date: datetime):
+    def go_short(self, option: Option):
+        """
+        Sell an option if there is space and enough cash. Short Position
+        In this case its not neccesary to have the cash, as we receive the premium.
+        TBI: Margin requirements and risk management for short positions.
+        """
+        for i in range(self.max_options):
+            if self.owned_options[i] is None:
+                option.position = "short"
+                self.owned_options[i] = option
+                self.cash += option.premium
+                logger.info(f"Sold option: {option} as a short position.")
+                return True
+        logger.info("No slot available to buy more options.")
+        return False
+
+    def close_option(self, index, current_date: datetime):
         """
         Sell the option at the given index if owned.
+
+        UPDATE: Change name from sell_option to close_option. This is because we can also close a short position,
+        where we will have to buy the option back. This will check if the option is owned (long) or short, and act accordingly.
+        In both cases, the option is removed from the portfolio, but if short the value is subtracted from cash instead of added.
+        If Long, the value is added to cash as before.
         """
         if 0 <= index < self.max_options and self.owned_options[index] is not None:
             option = self.owned_options[index]
             if current_date == option.date_generated:
                 logger.info("Cannot sell an option on the same day it was bought.")
                 return False
-            self.cash += option.value  # Assuming value is updated before selling
+            if option.position == "short":
+                # For short position, we need to buy back the option at current value
+                self.cash -= option.value
+            elif option.position == "long":
+                self.cash += option.value  # Assuming value is updated before selling
             logger.info(f"Sold option: {option}")
             logger.info(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
             self.owned_options[index] = None
@@ -78,7 +104,10 @@ class OptionsPortfolio:
                 if opt.expired:
                     logger.info(f"Option at slot {i} has expired and is being removed from portfolio.")
                     self.owned_options[i] = None
-                    self.cash += option_value
+                    if opt.position == "long":
+                        self.cash += option_value
+                    elif opt.position == "short":
+                        self.cash -= option_value
                 total_value += option_value # opt.value
         self.value_diff = total_value - self.portfolio_value
         self.total_value_diff = (total_value - self.initial_cash) / self.initial_cash

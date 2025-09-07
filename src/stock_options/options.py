@@ -3,6 +3,8 @@ from datetime import datetime, date
 import gymnasium as gym
 from gymnasium import spaces
 
+from typing import Literal
+
 import numpy as np
 from scipy.stats import norm
 
@@ -18,6 +20,7 @@ class Option:
     days_to_expire: int
     spot_price: float
     premium: float
+    position: Literal["long", "short"] = field(default="long")  # "long" or "short", long by default    
     expired: bool = field(default=False)
     value: float = field(default=0.0)
     r: float = field(default=0.01)    # risk-free rate
@@ -38,62 +41,10 @@ class Option:
         return self.value
 
     def __repr__(self):
-        return (f"Option(type={self.option_type}, strike={self.strike}, "
+        return (f"Position={self.position}, Option(type={self.option_type}, strike={self.strike}, "
                 f"expiry={self.expiry_date}, premium={self.premium}, generated on={self.date_generated})")
 
 
-
-class Option_old:
-    def __init__(self, option_type, strike, date_generated, expiry_date, days_to_expire, spot_price, premium):
-        self.option_type = option_type
-        self.strike = strike
-        self.date_generated = date_generated
-        self.expiry_date = expiry_date
-        self.days_to_expire = days_to_expire
-        self.spot_price = spot_price
-        self.premium = premium
-        self.value = premium  # Initial value is the premium paid 
-
-        self.r = 0.01  # Placeholder for risk-free rate, should be set based on market data
-        self.sigma = 0.2  # Placeholder for volatility, should be set based on market data
-        self.q = 0  # Placeholder for dividend yield, should be set based
-
-    @classmethod
-    def from_dict(cls, d):
-        """
-        Create an Option instance from a dictionary.
-        """
-        return cls(
-            option_type=d["type"][0],
-            strike=d["strike"][0],
-            date_generated=d["current_date"][0],
-            expiry_date=d["expiry_date"][0],
-            days_to_expire=d["days_to_expiry"][0],
-
-            spot_price=d["spot_price"][0],
-            premium=d["premium"][0]
-        )
-    
-    def __repr__(self):
-        return f"Option(type={self.option_type}, strike={self.strike}, expiry={self.expiry_date}, generated on={self.date_generated})"
-
-    def evaluate_option(self, current_price, current_date):
-        """
-        Evaluate the option's value based on the current price.
-        This is a placeholder for actual valuation logic.
-        """
-        self.days_to_expire = (self.expiry_date - current_date).days
-        if self.days_to_expire <= 0:
-            """ Option has expired, return its intrinsic value. IMPLEMENT"""
-            pass
-        if self.option_type == "call":
-            # call_value = blackScholesCall(current_price, self.strike, days_to_expire / 365.0, self.r, self.sigma, self.q)
-            self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
-            return self.value 
-        elif self.option_type == "put":
-            # put_value = blackScholesPut(current_price, self.strike, days_to_expire / 365.0, self.r, self.sigma, self.q)
-            self.value = blackScholesPut(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
-            return self.value
 
 def define_action_space(env: gym.Env) -> spaces.MultiBinary:
     """
@@ -133,9 +84,16 @@ def define_action_space_with_sell(env: gym.Env) -> spaces.MultiDiscrete:
 
     Each element in the MultiDiscrete array corresponds to an available option (call or put).
     For each option:
-        - 0 means "sell"
-        - 1 means "hold" (do nothing)
-        - 2 means "buy"
+        - 0 means "hold" (do nothing)
+        - 1 means "buy"
+        - 2 means "sell"
+
+    Sell (short):
+        It is possible to go short (sell a non-owned option) if there is an empty slot in the owned options.
+        The Option will be added to the owned options with one of this options (still to decide):
+            - negative premium (cash increases)
+            - parameter to indicate short position
+            - other?
 
     The total number of actions is determined by:
         n_options = ((n_strikes * 2) + 1) * n_months * 2
@@ -153,8 +111,9 @@ def define_action_space_with_sell(env: gym.Env) -> spaces.MultiDiscrete:
         gymnasium.spaces.MultiDiscrete: The action space for the environment.
     """
     n_options = (env.n_strikes * 2 + 1) * env.n_months * 2  # 2 for call and put options
-    # Each option: 0=sell, 1=hold, 2=buy
-    return spaces.MultiDiscrete([3] * n_options)
+    # Add the maximum number of options that can be owned at once
+    max_own = env.max_options
+    return spaces.MultiDiscrete([3]*n_options + [2]*max_own)
 
 
 # Black Scholes functions

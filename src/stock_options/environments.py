@@ -20,7 +20,7 @@ from stock_options.optionsPortfolio import OptionsPortfolio
 
 from stock_options.blackScholes import gen_option_for_date
 # from src.options import define_action_space, Option
-from stock_options.options import define_action_space
+from stock_options.options import define_action_space, define_action_space_with_sell
 
 # from datetime import datetime, date
 
@@ -63,6 +63,11 @@ class TradingEnv(gym.Env):
     - n_strikes : int : The number of strikes above and below the spot price. Default is 2.
     - n_months : int : The number of months to consider for options. Default is 1.
     - strike_step_pct : float : The step percentage for strikes. Default is 0.1 (10%).
+    - go_short : bool : Whether to allow short selling of options. Default is False.
+
+    If go_short is True, the agent can sell options it does not own, effectively going short on them. This adds complexity to the 
+    environment and may require additional handling of margin and risk. What happens is that, the option is added to the owned_options list
+    as a short position.
 
     On every step, the environment:
         - Performs the action (buy/sell/hold options)
@@ -81,7 +86,8 @@ class TradingEnv(gym.Env):
                 max_options = 2,
                 n_strikes = 2,
                 n_months = 1,
-                strike_step_pct = 0.1
+                strike_step_pct = 0.1,
+                go_short: bool = False,
                 ):
         self.initial_cash = float(initial_cash)
         self.df = df
@@ -94,9 +100,12 @@ class TradingEnv(gym.Env):
         # Options
         self._initialize_options_parameters(max_options, n_strikes, n_months, strike_step_pct)
         
-        # self.action_space = spaces.Discrete(len(positions))
-        self.action_space = define_action_space(self)
-        # self._initialize_state()
+        if go_short:
+            logger.info("Short selling of options is ENABLED.")
+            self.action_space = define_action_space_with_sell(self)
+        else:
+            self.action_space = define_action_space(self)
+        
         self._initialize_observation_space()
         self.reset()
 
@@ -211,14 +220,28 @@ class TradingEnv(gym.Env):
                 # Do nothing
                 pass
             elif action == 1:
-                # Case of buting an available option
-                logger.info("Buying option")
+                # Case of buying an available option (go long)
+                logger.info("Buying option (long position)")
                 try:
                     # Check if there is an available option at index i
                     option = self.state.options_available[i]
                     if isinstance(option, Option):
                         # Check if option isinstance(Option)
                         self.state.portfolio.buy_option(option)
+                        # Update the portfolio and state
+                except IndexError:
+                    logger.info(f"No available option at index {i}, cannot buy.")
+                pass
+            elif action == 2:
+                # Case of selling an available option (go short)
+                logger.info("selling option (short position)")
+                try:
+                    # Check if there is an available option at index i
+                    option = self.state.options_available[i]
+                    if isinstance(option, Option):
+                        # Check if option isinstance(Option)
+                        self.state.portfolio.go_short(option)
+                        # self.state.portfolio.buy_option(option)
                         # Update the portfolio and state
                 except IndexError:
                     logger.info(f"No available option at index {i}, cannot buy.")
@@ -248,7 +271,7 @@ class TradingEnv(gym.Env):
                     # option = self.state.portfolio.owned_options[i]
                     if isinstance(self.state.portfolio.owned_options[i], Option):
                         # Sell the option
-                        self.state.portfolio.sell_option(i, self.state.current_date)
+                        self.state.portfolio.close_option(i, self.state.current_date)
                         # Update the portfolio and state
                 except IndexError:
                     logger.info(f"No available option at index {i}, cannot sell.")
@@ -583,7 +606,7 @@ if __name__ == "__main__":
     df = load_data(csv_path)
 
     logger.info("Initializing environment for basic test...")
-    env = TradingEnv(df, window_size=10, n_months=1) # Use a basic reward
+    env = TradingEnv(df, window_size=10, n_months=1, go_short=True) # Use a basic reward
 
     # Check env for SB3 compatibility
     from stable_baselines3.common.env_checker import check_env
