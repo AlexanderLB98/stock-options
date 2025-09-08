@@ -30,9 +30,12 @@ class Option:
     def evaluate_option(self, current_price, current_date):
         self.days_to_expire = (self.expiry_date - current_date).days
         if self.days_to_expire <= 0:
-            # Option has expired, return intrinsic value (implement as needed)
+            # Option has expired, return intrinsic value
             self.expired = True
-            self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
+            if self.option_type == "call":
+                self.value = blackScholesCall(current_price, self.strike, 0, self.r, self.sigma, self.q)
+            elif self.option_type == "put":
+                self.value = blackScholesPut(current_price, self.strike, 0, self.r, self.sigma, self.q)
             return self.value
         if self.option_type == "call":
             self.value = blackScholesCall(current_price, self.strike, self.days_to_expire / 365.0, self.r, self.sigma, self.q)
