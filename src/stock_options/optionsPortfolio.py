@@ -108,7 +108,12 @@ class OptionsPortfolio:
                         self.cash += option_value
                     elif opt.position == "short":
                         self.cash -= option_value
-                total_value += option_value # opt.value
+                
+                # For portfolio valuation: long positions add value, short positions subtract value (liability)
+                if opt.position == "long":
+                    total_value += option_value
+                elif opt.position == "short":
+                    total_value -= option_value
         self.value_diff = total_value - self.portfolio_value
         self.total_value_diff = (total_value - self.initial_cash) / self.initial_cash
         # self.total_value_diff += self.value_diff # Or just always total_value - initial_cash. SAME?

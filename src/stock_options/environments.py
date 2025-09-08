@@ -248,7 +248,7 @@ class TradingEnv(gym.Env):
                 pass
             else:
                 # Invalid action
-                logger.warning(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (buy).")
+                logger.warning(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (buy), or 2 (sell short).")
                 pass
 
     def _perform_for_owned_options(self, actions):
