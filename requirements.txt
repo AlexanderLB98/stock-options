@@ -1,5 +1,0 @@
-scipy
-pandas
-polars
-gymnasium
-

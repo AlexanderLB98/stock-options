@@ -28,6 +28,10 @@ def blackScholesCall(S, K, T, r, sigma, q=0):
         # If option expired, payoff is immediate intrinsic value
         return max(S - K, 0)
     
+    # Validate inputs to prevent division by zero
+    if K <= 0 or S <= 0 or sigma <= 0:
+        return max(S - K, 0)  # Return intrinsic value for invalid inputs
+    
     d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
     
@@ -53,6 +57,10 @@ def blackScholesPut(S, K, T, r, sigma, q=0):
     if T <= 0:
         # If option expired, payoff is immediate intrinsic value
         return max(K - S, 0)
+    
+    # Validate inputs to prevent division by zero
+    if K <= 0 or S <= 0 or sigma <= 0:
+        return max(K - S, 0)  # Return intrinsic value for invalid inputs
     
     d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
     d2 = d1 - sigma * np.sqrt(T)
@@ -125,6 +133,14 @@ def gen_even_int_strikes(spot_price, num_strikes):
 
     # Generate strikes around it
     strikes = [nearest_even + 2 * i for i in range(-num_strikes, num_strikes + 1)]
+    
+    # Filter out zero or negative strikes to avoid division by zero
+    strikes = [strike for strike in strikes if strike > 0]
+    
+    # Ensure we have at least one strike (the spot price itself if needed)
+    if not strikes:
+        strikes = [max(2, int(spot_price))]
+    
     return strikes
 
 def get_third_fridays(n_months: int, start_date: date = None):

@@ -15,7 +15,7 @@ from gymnasium.wrappers import FlattenObservation
 from stock_options.options import Option
 from stock_options.stateManagement import initialize_state, State
 from stock_options.utils.history import History
-from stock_options.utils.data import load_data, flatten_obs
+from stock_options.utils.data import load_data, flatten_obs, load_random_data
 from stock_options.optionsPortfolio import OptionsPortfolio
 
 from stock_options.blackScholes import gen_option_for_date
@@ -109,7 +109,7 @@ class TradingEnv(gym.Env):
         self._initialize_observation_space()
         self.reset()
 
-    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
+    def reset(self, seed: Optional[int] = 42, options: Optional[dict] = None):
         """Start a new episode. Initialize the state and generate options for the first date.
 
         Args:
@@ -121,7 +121,9 @@ class TradingEnv(gym.Env):
         """
         # IMPORTANT: Must call this first to seed the random number generator
         super().reset(seed=seed)
-        
+        # Use default seed if None is provided (e.g., by check_env)
+        effective_seed = seed if seed is not None else 42
+        self.df = load_random_data("data/stock_data_2025_09_10.csv", seed=effective_seed)
         self.state = self._initialize_state()
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
@@ -652,12 +654,12 @@ if __name__ == "__main__":
 
         flat_obs = flatten_obs(observation)
         # Verify flattened observation shape in loop
-        assert len(flat_obs) == expected_flat_obs_shape, f"Step {info.current_step}: Flattened observation shape mismatch: {len(flat_obs)} vs {expected_flat_obs_shape}"
+        assert len(flat_obs) == expected_flat_obs_shape, f"Step {info['current_step']}: Flattened observation shape mismatch: {len(flat_obs)} vs {expected_flat_obs_shape}"
 
         # High-level checks for critical external state
-        assert info["portfolio"].portfolio_value >= 0, f"Step {info.current_step}: Portfolio value became negative: {info.portfolio.portfolio_value}"
-        assert info["portfolio"].cash >= 0, f"Step {info["current_step"]}: Cash became negative: {info["portfolio"].cash}"
-        assert len(info["options_available"]) <= env.n_options, f"Step {info["current_step"]}: Too many available options: {len(info["options_available"])} > {env.n_options}"
+        assert info["portfolio"].portfolio_value >= 0, f"Step {info['current_step']}: Portfolio value became negative: {info['portfolio'].portfolio_value}"
+        assert info["portfolio"].cash >= 0, f"Step {info['current_step']}: Cash became negative: {info['portfolio'].cash}"
+        assert len(info["options_available"]) <= env.n_options, f"Step {info['current_step']}: Too many available options: {len(info['options_available'])} > {env.n_options}"
         
         logger.info(f"Step {info["current_step"]}: Reward={reward:.4f}, Portfolio={info["portfolio"].portfolio_value:.2f}, Cash={info["portfolio"].cash:.2f}, Available Options={len(info["options_available"])}")
         logger.debug(f"Obs: {observation}") # Use debug for full observation, info
