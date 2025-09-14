@@ -148,6 +148,8 @@ def get_third_fridays(n_months: int, start_date: date = None):
     Generate a list of dates corresponding to the third Friday of each month 
     for the next `n_months`, starting from today (or a custom start_date).
 
+    If the current date is past the third Friday of the month, the list starts from the next month.
+
     Parameters:
     - n_months (int): Number of months to generate.
     - start_date (date, optional): Start date. Defaults to today.
@@ -161,6 +163,23 @@ def get_third_fridays(n_months: int, start_date: date = None):
     third_fridays = []
     year = start_date.year
     month = start_date.month
+
+    # Find the third Friday of the current month
+    month_cal = calendar.monthcalendar(year, month)
+    if month_cal[0][calendar.FRIDAY] != 0:
+        third_friday = month_cal[2][calendar.FRIDAY]
+    else:
+        third_friday = month_cal[3][calendar.FRIDAY]
+    third_friday_date = datetime(year, month, third_friday)
+
+    # If start_date is after the third Friday, start from next month
+    if start_date > third_friday_date:
+        # Move to next month
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
 
     for _ in range(n_months):
         # Get calendar matrix for the month
