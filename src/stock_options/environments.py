@@ -30,12 +30,12 @@ warnings.filterwarnings("error")
 
 import logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     force=True # Overwrite any existing logging configuration
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 
 
 
@@ -88,14 +88,18 @@ class TradingEnv(gym.Env):
                 n_months = 1,
                 strike_step_pct = 0.1,
                 go_short: bool = False,
+                mode: str = 'train'
                 ):
         self.initial_cash = float(initial_cash)
-        self.df = df
+        self.input_df = df
         self.window_size = window_size
 
         # Features
         self._features = [col for col in df.columns if "feature" in col]
         self._nb_features = len(self._features)
+
+        # Training or testing mode
+        self.mode = mode
 
         # Options
         self._initialize_options_parameters(max_options, n_strikes, n_months, strike_step_pct)
@@ -123,7 +127,15 @@ class TradingEnv(gym.Env):
         super().reset(seed=seed)
         # Use default seed if None is provided (e.g., by check_env)
         effective_seed = seed if seed is not None else 42
-        self.df = load_random_data("data/stock_data_2025_09_10.csv", seed=effective_seed)
+        # if self.mode == 'train':
+        #     self.df = load_random_data("data/train_data.csv", seed=effective_seed)
+        # elif self.mode == 'test':
+        #     self.df = load_random_data("data/test_data.csv", seed=effective_seed)
+        # else:
+        #     raise ValueError("mode must be 'train' or 'test'")
+        
+        self.df = self._get_random_df(effective_seed)
+        
         self.state = self._initialize_state()
         self.state.current_date = self.df[self.state.current_step, "date"]
         self.state.current_price = self.df[self.state.current_step, "close"]
@@ -141,6 +153,36 @@ class TradingEnv(gym.Env):
         info = self._get_info()
         logger.info(f"Initial info: {info}")
         return observation, info
+
+    def _get_random_df(self, seed):
+        """
+        Get a random subset from the input_df based on the seed. Generates a random company code and initial date.
+        """
+        df = self.input_df
+        
+        company_codes = df["company_code"].unique().to_list()
+        random_company_code = company_codes[seed % len(company_codes)]
+        df = df.filter(pl.col("company_code") == random_company_code)
+
+        # Selects random initial date within the selected company code data
+        dates = df["date"].unique().sort().to_list()
+        # Ensure we have enough dates and don't go out of bounds
+        # Reserve at least 1000 rows for the environment to work with
+        min_required_rows = 1000
+        max_start_index = max(0, len(dates) - min_required_rows) if len(dates) > min_required_rows else 0
+        
+        if max_start_index <= 0:
+            # If we don't have enough dates, just use the first date to get maximum data
+            random_initial_date = dates[0]
+        else:
+            random_initial_date = dates[seed % max(1, max_start_index)]
+        
+        df = df.filter(pl.col("date") >= random_initial_date)
+        df = df.sort("date")
+        logger.info(f"Selected initial date: {random_initial_date}")
+        logger.info(f"DataFrame after date filter has {len(df)} rows")
+
+        return df
 
     def render(self):
         pass
@@ -182,6 +224,7 @@ class TradingEnv(gym.Env):
         self.state.current_price = self.df[self.state.current_step, "close"]
 
         self.state.portfolio.portfolio_value = self.get_portfolio_value()
+
         # Get list of available options for the current date
         self.state.options_available = self.update_options()
         
@@ -192,7 +235,13 @@ class TradingEnv(gym.Env):
 
         if self.state.current_step >= len(self.df) - 1:
             truncated = True
-        
+            print(f"Reached the end of the data. Portfolio value: {self.state.portfolio.portfolio_value}")
+
+        if self.state.portfolio.portfolio_value <= 0:
+            logger.warning("Portfolio value has dropped to zero or below. Terminating episode.")
+            terminated = True
+            truncated = True
+
         return observation, reward, terminated, truncated, info
 
     def perform_action(self, actions):
@@ -339,7 +388,7 @@ class TradingEnv(gym.Env):
 
         self.options = self.options + options_call + options_put
         self.options = sorted(self.options, key=lambda opt: opt.date_generated, reverse=True)
-        self.options = [opt for opt in self.options if opt.expiry_date >= self.state.current_date]
+        self.options = [opt for opt in self.options if opt.expiry_date >= self.state.current_date and opt.premium > 0]
 
         seen = set()
         unique_options = []
@@ -397,10 +446,11 @@ class TradingEnv(gym.Env):
         returns:
             state: The initialized state object.
         """
-        state = initialize_state(current_step = self.window_size, initial_cash = self.initial_cash)
+        # state = initialize_state(current_step = self.window_size, initial_cash = self.initial_cash)
         state = initialize_state(current_step = self.window_size, initial_cash = self.initial_cash, max_options = self.max_options)
         assert state.current_step == self.window_size, "Initial step mismatch."
         assert state.portfolio.cash == self.initial_cash, "Initial cash mismatch."
+        assert state.portfolio.portfolio_value == self.initial_cash, "Initial portfolio value mismatch."
         logger.debug(f"State initialized: current_step={state.current_step}, cash={state.portfolio.cash}")
         return state
 
@@ -556,25 +606,6 @@ class TradingEnv(gym.Env):
 
         logger.info(f"Observation space initialized with N={N}, M={M} (n_options), K={K} (max_options)")
         
-        # self.observation_space = Dict({
-        #     "portfolio": Dict({
-        #         "cash": Box(low=0, high=np.inf, shape=(), dtype=np.float32),
-        #         "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
-        #         "value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32),
-        #         "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(), dtype=np.float32)
-        #     }),
-        #     "today": Dict({
-        #         "open": Box(-np.inf, np.inf, shape=()),
-        #         "close": Box(-np.inf, np.inf, shape=()),
-        #         "low": Box(-np.inf, np.inf, shape=()),
-        #         "high": Box(-np.inf, np.inf, shape=()),
-        #         "volume": Box(-np.inf, np.inf, shape=()),
-        #     }),
-        #     "last_closes": Box(-np.inf, np.inf, shape=(N,)),
-        #     "last_volumes": Box(-np.inf, np.inf, shape=(N,)),
-        #     "available_options": Box(-np.inf, np.inf, shape=(M, 4)),
-        #     "owned_options": Box(-np.inf, np.inf, shape=(K, 4)),
-        # })
         self.observation_space = Dict({
             # Portfolio
             "cash": Box(low=0, high=np.inf, shape=(1, ), dtype=np.float32),
