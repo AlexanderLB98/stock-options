@@ -113,7 +113,7 @@ class TradingEnv(gym.Env):
         self._initialize_observation_space()
         self.reset()
 
-    def reset(self, seed: Optional[int] = 42, options: Optional[dict] = None):
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         """Start a new episode. Initialize the state and generate options for the first date.
 
         Args:
@@ -126,7 +126,8 @@ class TradingEnv(gym.Env):
         # IMPORTANT: Must call this first to seed the random number generator
         super().reset(seed=seed)
         # Use default seed if None is provided (e.g., by check_env)
-        effective_seed = seed if seed is not None else 42
+        effective_seed = seed if seed is not None else np.random.randint(0, 1_000_000)
+        print(f"Resetting environment with seed {effective_seed}")
         # if self.mode == 'train':
         #     self.df = load_random_data("data/train_data.csv", seed=effective_seed)
         # elif self.mode == 'test':
@@ -238,7 +239,7 @@ class TradingEnv(gym.Env):
             print(f"Reached the end of the data. Portfolio value: {self.state.portfolio.portfolio_value}")
 
         if self.state.portfolio.portfolio_value <= 0:
-            logger.warning("Portfolio value has dropped to zero or below. Terminating episode.")
+            logger.info("Portfolio value has dropped to zero or below. Terminating episode.")
             terminated = True
             truncated = True
 
@@ -253,7 +254,7 @@ class TradingEnv(gym.Env):
         - Next `self.max_options` elements: Actions for options currently held in the portfolio (0=No-op, 1=Sell).
 
         """
-        logger.info(f"Actions received: {actions}")
+        # logger.info(f"Actions received: {actions}")
         assert len(actions) == self.n_options + self.max_options, f"Action length {len(actions)} does not match expected {self.n_options + self.max_options}"
         self._perform_for_available_options(actions[:self.n_options]) # Give actions for available options (first n_options elements)
         self._perform_for_owned_options(actions[-self.max_options:]) # Give actions for owned options (last max_options elements)
@@ -264,9 +265,9 @@ class TradingEnv(gym.Env):
 
             If action is 1, will instantiate the option. If no option in that index, just skip
         """
-        logger.info(f"Performing actions: {actions}")
+        # logger.info(f"Performing actions: {actions}")
         for i, action in enumerate(actions):
-            logger.info(f"action[{i}] = {action}")
+            # logger.info(f"action[{i}] = {action}")
             if action == 0:
                 # Do nothing
                 pass
@@ -295,11 +296,11 @@ class TradingEnv(gym.Env):
                         # self.state.portfolio.buy_option(option)
                         # Update the portfolio and state
                 except IndexError:
-                    logger.info(f"No available option at index {i}, cannot buy.")
+                    logger.info(f"No available option at index {i}, cannot sell.")
                 pass
             else:
                 # Invalid action
-                logger.warning(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (buy), or 2 (sell short).")
+                logger.info(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (buy), or 2 (sell short).")
                 pass
 
     def _perform_for_owned_options(self, actions):
@@ -308,14 +309,14 @@ class TradingEnv(gym.Env):
 
             If action is 1, will instantiate the option. If no option in that index, just skip
         """
-        logger.info(f"Performing actions: {actions}")
+        # logger.info(f"Performing actions: {actions}")
         for i, action in enumerate(actions):
-            logger.info(f"action[{i}] = {action}")
+            # logger.info(f"action[{i}] = {action}")
             if action == 0:
                 # Do nothing
                 pass
             elif action == 1:
-                # Case of buting an available option
+                # Case of selling an available option
                 logger.info("selling option")
                 try:
                     # Check if there is an available option at index i
@@ -329,7 +330,7 @@ class TradingEnv(gym.Env):
                 pass
             else:
                 # Invalid action
-                logger.warning(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (sell).")
+                logger.warninginfo(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (sell).")
                 pass
         
     
