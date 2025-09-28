@@ -3,12 +3,12 @@ from datetime import datetime, date
 
 import logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     force=True # Overwrite any existing logging configuration
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 
 
 
@@ -16,7 +16,7 @@ class OptionsPortfolio:
     """
     Portfolio for managing options contracts.
     """
-    def __init__(self, initial_cash:float, max_options: int=2):
+    def __init__(self, initial_cash:float, max_options: int=2, transaction_cost: float=0.05):
         self.initial_cash = initial_cash
         self.cash = initial_cash
         self.portfolio_value = initial_cash
@@ -24,6 +24,8 @@ class OptionsPortfolio:
         self.owned_options = [None] * max_options  # Each slot can hold an Option or None
         self.total_value_diff: float = 0.0
         self.value_diff: float = 0.0
+        self.transaction_cost: float = transaction_cost  # 5% transaction cost by default
+        self.transaction_history = []  # List to log transactions
 
     def buy_option(self, option: Option):
         """
@@ -74,9 +76,21 @@ class OptionsPortfolio:
                 return False
             if option.position == "short":
                 # For short position, we need to buy back the option at current value
-                self.cash -= option.value
+                self.cash -= option.value * (1 + self.transaction_cost)  # Pay the current value plus transaction cost
+                self.transaction_history.append({
+                    "Option": option, 
+                    "Strike": option.strike,
+                    "Asset_course": option.spot_price,
+                    "benefit": option.premium - option.value*(1 + self.transaction_cost)
+                })
             elif option.position == "long":
-                self.cash += option.value  # Assuming value is updated before selling
+                self.cash += option.value * (1 - self.transaction_cost)  # Assuming value is updated before selling
+                self.transaction_history.append({
+                    "Option": option, 
+                    "Strike": option.strike,
+                    "Asset_course": option.spot_price,
+                    "benefit": option.value * (1 - self.transaction_cost) - option.premium
+                })
             logger.info(f"Sold option: {option}")
             logger.info(f"Sold option for {option.value}. Premium was {option.premium}. Difference: {option.value - option.premium:.2f}")
             self.owned_options[index] = None

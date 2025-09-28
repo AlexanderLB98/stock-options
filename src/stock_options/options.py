@@ -45,7 +45,7 @@ class Option:
 
     def __repr__(self):
         return (f"Position={self.position}, Option(type={self.option_type}, strike={self.strike}, "
-                f"expiry={self.expiry_date}, premium={self.premium}, generated on={self.date_generated})")
+                f"expiry={self.expiry_date}, premium={self.premium}, value={self.value} generated on={self.date_generated})")
 
 
 
