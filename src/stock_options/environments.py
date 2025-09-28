@@ -239,7 +239,7 @@ class TradingEnv(gym.Env):
             print(f"Reached the end of the data. Portfolio value: {self.state.portfolio.portfolio_value}")
 
         if self.state.portfolio.portfolio_value <= 0:
-            logger.info("Portfolio value has dropped to zero or below. Terminating episode.")
+            print("Portfolio value has dropped to zero or below. Terminating episode.")
             terminated = True
             truncated = True
 
