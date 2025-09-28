@@ -6,12 +6,12 @@ import logging
 
 import logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s [%(levelname)s] %(message)s",
     force=True # Overwrite any existing logging configuration
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 
 
 def load_data(csv_path):
@@ -45,12 +45,28 @@ def load_random_data(csv_path, seed):
     # Selects random initial date within the selected company code data
     dates = df["date"].unique().sort().to_list()
     # Ensure we have enough dates and don't go out of bounds
-    max_start_index = max(0, len(dates) - 1000) if len(dates) > 1000 else len(dates) - 1
+    # Reserve at least 1000 rows for the environment to work with
+    min_required_rows = 1000
+    max_start_index = max(0, len(dates) - min_required_rows) if len(dates) > min_required_rows else 0
+    
     if max_start_index <= 0:
-        max_start_index = len(dates) - 1
-    random_initial_date = dates[seed % max(1, max_start_index)]
+        # If we don't have enough dates, just use the first date to get maximum data
+        random_initial_date = dates[0]
+    else:
+        random_initial_date = dates[seed % max(1, max_start_index)]
+    
     df = df.filter(pl.col("date") >= random_initial_date)
     logger.info(f"Selected initial date: {random_initial_date}")
+    logger.info(f"DataFrame after date filter has {len(df)} rows")
+
+    # Final check: ensure we have enough rows for the trading environment
+    min_rows_needed = 50  # Minimum rows needed 
+    if len(df) < min_rows_needed:
+        logger.warning(f"Not enough data after filtering ({len(df)} rows). Using full company data.")
+        # Use the full company data if filtered data is too small
+        df = pl.read_csv(csv_path, try_parse_dates=True)
+        df = df.filter(pl.col("company_code") == random_company_code)
+        logger.info(f"Using full company data: {len(df)} rows")
 
     # Make sure date is datetime
     df = df.with_columns(pl.col("date").cast(pl.Datetime))
