@@ -6,8 +6,9 @@ into a PPO training loop.
 """
 import os 
 from stable_baselines3 import PPO
+from sb3_contrib import RecurrentPPO
 from stable_baselines3.common.callbacks import CallbackList, CheckpointCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecFrameStack
 
 from stock_options.environments import TradingEnv
 from stock_options.utils.data import load_random_data
@@ -23,11 +24,11 @@ logger.setLevel(logging.INFO)
 def make_env(seed, csv_path, max_options, n_months, go_short):
     def _init():
         df = load_random_data(csv_path, seed)
-        env = TradingEnv(df, window_size=10, max_options=max_options, n_months=n_months, go_short=go_short)
+        env = TradingEnv(df, window_size=10, max_options=max_options, n_months=n_months, go_short=go_short, flatten_observations=True)
         return env
     return _init
 
-def train_with_evaluation():
+def train_with_evaluation(max_options = 4, n_months = 2, name=None):
     """Example training script with evaluation callback."""
     
     # Load training data
@@ -35,9 +36,11 @@ def train_with_evaluation():
     seed = 123  # Different seed for training
     df = load_random_data(csv_path, seed)
     
-    max_options = 10
-    n_months = 3
+    max_options = 4
+    n_months = 2
     model_name_suffix = f"short_selling_max_options_{max_options}_n_months_{n_months}"
+    if name:
+        model_name_suffix = f"{name}_{model_name_suffix}"
 
     # Create training environment
     # env = TradingEnv(df, window_size=10, max_options=max_options, n_months=n_months, go_short=True)
@@ -55,8 +58,9 @@ def train_with_evaluation():
         make_env(seed + i, csv_path, max_options, n_months, True) 
         for i in range(num_envs)
     ])
-    model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cuda" if torch.cuda.is_available() else "cpu")
-    
+    # model = PPO("MultiInputPolicy", env, verbose=1, tensorboard_log="./ppo_trading_tensorboard/", device="cuda" if torch.cuda.is_available() else "cpu")
+    model = RecurrentPPO("MlpLstmPolicy", env, verbose=1, tensorboard_log="./recurrent_ppo_trading_tensorboard/", device="cuda" if torch.cuda.is_available() else "cpu")
+
     # Create callbacks with dynamic path generation
     eval_callback = create_evaluation_callback(
         n_eval_steps=10000,  
@@ -66,7 +70,8 @@ def train_with_evaluation():
         window_size=10,      
         n_months=n_months,
         max_options=max_options,
-        go_short=True
+        go_short=True,
+        flatten_observations=True
     )
     
     checkpoint_callback = CheckpointCallback(
@@ -78,15 +83,15 @@ def train_with_evaluation():
     callback = CallbackList([eval_callback, checkpoint_callback])
     
     model.learn(
-        total_timesteps=10000000,
+        total_timesteps=1000000,
         callback=callback,
-        tb_log_name="PPO_with_evaluation"
+        tb_log_name="recurrent_PPO_with_evaluation"
     )
     
     # Save final model
-    model.save("models/ppo_trading_final")
+    model.save("models/recurrent_ppo_trading_final")
     logger.info("Training completed!")
 
 
 if __name__ == "__main__":
-    train_with_evaluation()
+    train_with_evaluation(max_options = 4, n_months = 2, name="multiProcessing_training")

@@ -88,11 +88,13 @@ class TradingEnv(gym.Env):
                 n_months = 1,
                 strike_step_pct = 0.1,
                 go_short: bool = False,
-                mode: str = 'train'
+                mode: str = 'train',
+                flatten_observations: bool = False
                 ):
         self.initial_cash = float(initial_cash)
         self.input_df = df
         self.window_size = window_size
+        self.flatten_observations = flatten_observations
 
         # Features
         self._features = [col for col in df.columns if "feature" in col]
@@ -582,6 +584,10 @@ class TradingEnv(gym.Env):
         # Make sure the observation matches the expected shape
         assert len(flatten_obs(obs)) == expected_shape, f"Observation shape mismatch: got {len(flatten_obs(obs))}, expected {expected_shape}"
         
+        # Return flattened observations if requested
+        if self.flatten_observations:
+            return flatten_obs(obs)
+        
         return obs
     
     def _initialize_observation_space(self):
@@ -607,26 +613,32 @@ class TradingEnv(gym.Env):
 
         logger.info(f"Observation space initialized with N={N}, M={M} (n_options), K={K} (max_options)")
         
-        self.observation_space = Dict({
-            # Portfolio
-            "cash": Box(low=0, high=np.inf, shape=(1, ), dtype=np.float32),
-            "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
-            "value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
-            "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
+        if self.flatten_observations:
+            # Calculate total flattened size
+            total_size = 4 + 5 + 2*N + 4*(M + K)
+            self.observation_space = Box(low=-np.inf, high=np.inf, shape=(total_size,), dtype=np.float32)
+            logger.info(f"Using flattened observation space with shape: {total_size}")
+        else:
+            self.observation_space = Dict({
+                # Portfolio
+                "cash": Box(low=0, high=np.inf, shape=(1, ), dtype=np.float32),
+                "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
+                "value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
+                "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
 
-            # Today
-            "open": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
-            "close": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
-            "low": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
-            "high": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
-            "volume": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                # Today
+                "open": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "close": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "low": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "high": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "volume": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
 
-            # Time series + options
-            "last_closes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
-            "last_volumes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
-            "available_options": Box(-np.inf, np.inf, shape=(M * 4, ), dtype=np.float32),
-            "owned_options": Box(-np.inf, np.inf, shape=(K * 4, ), dtype=np.float32),
-        })
+                # Time series + options
+                "last_closes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
+                "last_volumes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
+                "available_options": Box(-np.inf, np.inf, shape=(M * 4, ), dtype=np.float32),
+                "owned_options": Box(-np.inf, np.inf, shape=(K * 4, ), dtype=np.float32),
+            })
 
         logger.debug(f"Full observation space definition: {self.observation_space}")
 

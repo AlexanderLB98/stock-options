@@ -64,6 +64,7 @@ class EvaluationCallback(BaseCallback):
                  eval_env_kwargs: dict = None,
                  save_path: str = None,
                  model_name_suffix: str = "",
+                 flatten_observations: bool = False,
                  verbose: int = 1):
         """
         Initialize the evaluation callback.
@@ -84,6 +85,7 @@ class EvaluationCallback(BaseCallback):
         self.model_name_suffix = model_name_suffix
         self.last_eval_step = 0
         self.save_path = None  # Will be set when model is available
+        self.flatten_observations = flatten_observations
         
         # Initialize evaluation environment
         self._init_eval_env()
@@ -126,6 +128,7 @@ class EvaluationCallback(BaseCallback):
             'window_size': 10,
             'n_months': 1,
             'mode': "test",
+            'flatten_observations': self.flatten_observations,  # Add flattened observations for RecurrentPPO compatibility
             **self.eval_env_kwargs
         }
 
