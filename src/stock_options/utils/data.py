@@ -29,11 +29,12 @@ def load_data(csv_path):
     ])
     return df
 
-def load_random_data(csv_path, seed):
+def load_random_data(csv_path, seed=None):
     """
     Load the dataset "stock_data_2025_09_10.csv", select a random ticker and initial date
     depending on the seed, and return the corresponding DataFrame.
     """
+    seed = seed if seed is not None else np.random.randint(0, 1_000_000)
     df = pl.read_csv(csv_path, try_parse_dates=True)
     logger.info(f"{len(df)} rows loaded from {csv_path}")
 

@@ -32,7 +32,8 @@ def train_with_evaluation(max_options = 4, n_months = 2, name=None):
     """Example training script with evaluation callback."""
     
     # Load training data
-    csv_path = "data/stock_data_2025_09_10.csv"
+    # csv_path = "data/stock_data_2025_09_10.csv"
+    csv_path = "data/train/train_data_all.csv"
     seed = 123  # Different seed for training
     df = load_random_data(csv_path, seed)
     
@@ -71,7 +72,8 @@ def train_with_evaluation(max_options = 4, n_months = 2, name=None):
         n_months=n_months,
         max_options=max_options,
         go_short=True,
-        flatten_observations=True
+        flatten_observations=True,
+        csv_path="data/test/test_data_all.csv"  
     )
     
     checkpoint_callback = CheckpointCallback(

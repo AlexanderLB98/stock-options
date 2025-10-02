@@ -65,6 +65,7 @@ class EvaluationCallback(BaseCallback):
                  save_path: str = None,
                  model_name_suffix: str = "",
                  flatten_observations: bool = False,
+                 csv_path = "data/test_data.csv",
                  verbose: int = 1):
         """
         Initialize the evaluation callback.
@@ -86,6 +87,7 @@ class EvaluationCallback(BaseCallback):
         self.last_eval_step = 0
         self.save_path = None  # Will be set when model is available
         self.flatten_observations = flatten_observations
+        self.csv_path = csv_path
         
         # Initialize evaluation environment
         self._init_eval_env()
@@ -119,9 +121,11 @@ class EvaluationCallback(BaseCallback):
 
     def _init_eval_env(self):
         """Initialize the evaluation environment."""
-        csv_path = "data/test_data.csv"
-        seed = 42  # Use a fixed seed for reproducible evaluation
-        df_test = load_random_data(csv_path, seed)
+        # csv_path = "data/test_data.csv"
+        # DO I WANT TO ALWAYS CHECK THE SAME?
+        # seed = 42  # Use a fixed seed for reproducible evaluation
+        
+        df_test = load_random_data(self.csv_path)
         
         # Use provided kwargs or defaults
         env_kwargs = {
@@ -227,6 +231,7 @@ def create_evaluation_callback(n_eval_steps: int = 10000,
                               num_eval_runs: int = 10,
                               save_path: str = None,
                               model_name_suffix: str = "",
+                              csv_path = "data/test_data.csv",
                               **env_kwargs) -> EvaluationCallback:
     """
     Create an evaluation callback with the specified parameters.
@@ -259,5 +264,6 @@ def create_evaluation_callback(n_eval_steps: int = 10000,
         num_eval_runs=num_eval_runs,
         eval_env_kwargs=env_kwargs,
         save_path=save_path,
-        model_name_suffix=model_name_suffix
+        model_name_suffix=model_name_suffix,
+        csv_path=csv_path
     )
