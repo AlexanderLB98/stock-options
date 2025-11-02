@@ -59,6 +59,7 @@ class TradingEnv(gym.Env):
     inputs:
     - df : polars.DataFrame : A dataframe containing the historical price data and features. It must contain a 'close' column and feature columns (with 'feature' in their name).
     - initial_cash : float : The initial value of the portfolio. Default is 1000.
+    - window_size : int : The size of the observation window (number of past days to include). Default is 0 (no window).
     - max_options : int : The maximum number of options that can be owned at once. Default is 2.
     - n_strikes : int : The number of strikes above and below the spot price. Default is 2.
     - n_months : int : The number of months to consider for options. Default is 1.

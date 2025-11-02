@@ -115,8 +115,9 @@ def define_action_space_with_sell(env: gym.Env) -> spaces.MultiDiscrete:
     """
     n_options = (env.n_strikes * 2 + 1) * env.n_months * 2  # 2 for call and put options
     # Add the maximum number of options that can be owned at once
-    max_own = env.max_options
+    max_own = env.max_options # Remove this and make implicit in the env?
     return spaces.MultiDiscrete([3]*n_options + [2]*max_own)
+    
 
 
 # Black Scholes functions

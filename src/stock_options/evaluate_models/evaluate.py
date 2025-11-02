@@ -1,6 +1,7 @@
 # Currently not working properly...
 
 from stable_baselines3 import PPO
+from sb3_contrib import RecurrentPPO
 
 from stock_options.environments import TradingEnv, flatten_obs
 from stock_options.utils.data import load_random_data, flatten_obs
@@ -69,8 +70,8 @@ if __name__ == "__main__":
         
         current_test_step = 0
 
-        model_path = "models/ppo_trading_model_1000000_0"
-        model = PPO.load(model_path, device="cpu", env=env)
+        model_path = "models/recurrent_ppo_trading_final_0"
+        model = RecurrentPPO.load(model_path, device="cpu", env=env)
 
         while not done and not truncated:
             action, _state = model.predict(observation, deterministic=True)

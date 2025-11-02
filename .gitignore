@@ -209,3 +209,11 @@ __marimo__/
 
 models/
 data/
+results/
+ppo_trading_tensorboard/
+recurrent_ppo_trading_tensorboard/PPO_with_evaluation_1/events.out.tfevents.1759433607.lucas-arch.323945.0
+recurrent_ppo_trading_tensorboard/recurrent_PPO_with_evaluation_1/events.out.tfevents.1759434450.lucas-arch.330354.0
+recurrent_ppo_trading_tensorboard/recurrent_PPO_with_evaluation_2/events.out.tfevents.1759434668.lucas-arch.335375.0
+recurrent_ppo_trading_tensorboard/recurrent_PPO_with_evaluation_3/events.out.tfevents.1759434942.lucas-arch.342207.0
+recurrent_ppo_trading_tensorboard/recurrent_PPO_with_evaluation_4/events.out.tfevents.1759435241.lucas-arch.350030.0
+recurrent_ppo_trading_tensorboard/recurrent_PPO_with_evaluation_5/events.out.tfevents.1759435450.lucas-arch.354689.0
