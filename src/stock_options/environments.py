@@ -1,25 +1,30 @@
-from dataclasses import asdict
-
 from typing import Optional
 import gymnasium as gym
 from gymnasium import spaces
 
 import polars as pl
 import numpy as np
-from gymnasium.spaces import Dict, Box
+import datetime
+import glob
+from pathlib import Path    
 
+from collections import Counter
+from gymnasium.spaces import Dict, Box, Discrete
+from gymnasium.wrappers import FlattenObservation
+
+from stock_options.options import Option
 from stock_options.stateManagement import initialize_state, State
-from stock_options.utils.data import load_data, flatten_obs, TECHNICAL_INDICATORS_CONFIG
-from stock_options.utils.indicators import (
-    IncrementalIndicatorCalculator,
-    RollingNormalizer,
-    create_normalized_features
-)
-from stock_options.utils.rewards import RewardFactory, BaseReward
+from stock_options.utils.history import History
+from stock_options.utils.data import load_data, flatten_obs, load_random_data
+from stock_options.optionsPortfolio import OptionsPortfolio
 
-# Check env for SB3 compatibility
-from stable_baselines3.common.env_checker import check_env
-    
+from stock_options.blackScholes import gen_option_for_date
+# from src.options import define_action_space, Option
+from stock_options.options import define_action_space, define_action_space_with_sell
+
+# from datetime import datetime, date
+
+import tempfile, os
 import warnings
 warnings.filterwarnings("error")
 
@@ -30,194 +35,93 @@ logging.basicConfig(
     force=True # Overwrite any existing logging configuration
 )
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.INFO)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.WARNING)
 
 
 
 class TradingEnv(gym.Env):
     """
-    A trading environment for OpenAI gymnasium to trade stocks with incremental indicator calculation.
+    A trading environment for OpenAI gymnasium to trade stocks with options.
     
     This environment follows the standard `gymnasium.Env` interface. At each step, the agent
     receives an observation of the market and its portfolio and must take an action
-    related to buying or selling stocks. The goal is to maximize the portfolio's value.
-    
-    **Key Feature: No Look-Ahead Bias**
-    This environment calculates technical indicators incrementally at each step using only
-    historical data up to the current timestep. This ensures:
-    - Realistic backtesting that matches production behavior
-    - No future information leakage
-    - Same code works for both training and live trading
+    related to buying or selling options. The goal is to maximize the portfolio's value TBD.
 
     Attributes:
-        df (pl.DataFrame): The DataFrame containing all historical OHLCV market data.
+        df (pl.DataFrame): The DataFrame containing all historical market data.
         action_space (gym.spaces.Space): The space of actions the agent can take.
         observation_space (gym.spaces.Dict): The structure of the observation space.
         state: A state object (e.g., a dataclass) containing the full internal state of the environment.
-        portfolio (Portfolio): The object that manages cash and owned stocks.
-        indicator_calculator: Incremental calculator for technical indicators
-        normalizer: Rolling normalizer to avoid look-ahead bias in feature scaling
+        portfolio (OptionsPortfolio): The object that manages cash and owned options.
+    
+        self.n_options : int : The number of available options at each step. Depends on n_strikes and n_months.
 
     inputs:
-    - df : polars.DataFrame : A dataframe containing the historical OHLCV price data (open, high, low, close, volume).
+    - df : polars.DataFrame : A dataframe containing the historical price data and features. It must contain a 'close' column and feature columns (with 'feature' in their name).
     - initial_cash : float : The initial value of the portfolio. Default is 1000.
     - window_size : int : The size of the observation window (number of past days to include). Default is 0 (no window).
-    - max_shares_short : int : The maximum number of shares that can be shorted.
-    - use_incremental_indicators : bool : If True, calculates indicators incrementally (recommended). If False, uses pre-calculated indicators from df.
+    - max_options : int : The maximum number of options that can be owned at once. Default is 2.
+    - n_strikes : int : The number of strikes above and below the spot price. Default is 2.
+    - n_months : int : The number of months to consider for options. Default is 1.
+    - strike_step_pct : float : The step percentage for strikes. Default is 0.1 (10%).
+    - go_short : bool : Whether to allow short selling of options. Default is False.
+
+    If go_short is True, the agent can sell options it does not own, effectively going short on them. This adds complexity to the 
+    environment and may require additional handling of margin and risk. What happens is that, the option is added to the owned_options list
+    as a short position.
 
     On every step, the environment:
-        - Calculates technical indicators using only data up to current step
-        - Performs the action (buy/sell/hold)
-        - Updates the state (current step, date, price)
-        - Updates portfolio value
-        - Calculates reward
-        - Returns normalized observation
+        - Performs the action (buy/sell/hold options)
+        - update the state (current step, date, price, available options)
+        - update porfolio value
+        - get reward
+        - log/history
+        - get observation
+        - get info
     """
 
     def __init__(self,
                 df : pl.DataFrame,
                 initial_cash = 1000,
                 window_size = 0,
-                mode: str = 'train',  # 'train' or 'test' - controls indicator calculation strategy
-                flatten_observations: bool = True,  # Default to True for SB3 compatibility
-                max_short_positions: int = 5,
-                normalization_window: int = 100,  # Window for rolling normalization
-                episode_length: Optional[int] = 252,  # Fixed episode length in days (252 = 1 trading year)
-                reward_type: str = 'simple',  # Reward strategy: 'simple', 'multi', 'esg', etc.
-                reward_config: Optional[dict] = None  # Additional reward configuration
+                max_options = 2,
+                n_strikes = 2,
+                n_months = 1,
+                strike_step_pct = 0.1,
+                go_short: bool = False,
+                mode: str = 'train',
+                flatten_observations: bool = False
                 ):
-        """
-        Initialize TradingEnv with hybrid indicator calculation strategy.
-        
-        HYBRID STRATEGY (recommended for TFM):
-        =====================================
-        
-        TRAINING MODE (fast):
-            env = TradingEnv(df, mode='train')
-            → Uses pre-calculated indicators from data.py (batch mode)
-            → ~100x faster for training millions of steps
-            → No look-ahead bias IF data.py uses rolling windows correctly
-            → Perfect for PPO training iterations
-            
-        TEST/EVALUATION MODE (realistic):
-            env = TradingEnv(df, mode='test')
-            → Calculates indicators step-by-step (incremental mode)
-            → Slower but proves model works without future data
-            → Same code that will run in production with API data
-            → Use for final validation and walk-forward testing
-            
-        This hybrid approach gives you:
-        ✅ Fast training iterations
-        ✅ Rigorous testing without look-ahead bias
-        ✅ Production-ready code
-        ✅ Academic rigor for your TFM
-        
-        EPISODE MANAGEMENT (for TFM comparability):
-        ===========================================
-        
-        Fixed-length episodes (recommended):
-            env = TradingEnv(df, episode_length=252)  # 1 trading year
-            → Consistent episode length for fair algorithm comparison
-            → Better training stability
-            → Easier to interpret results
-            → Recommended: 200-252 days (6-12 months)
-            
-        Variable-length episodes (legacy):
-            env = TradingEnv(df, episode_length=None)
-            → Episode runs until end of data or portfolio=0
-            → Higher variance, harder to compare
-            
-        REWARD CONFIGURATION:
-        =====================
-        
-        Simple baseline:
-            env = TradingEnv(df, reward_type='simple')
-            
-        Risk-adjusted:
-            env = TradingEnv(df, reward_type='risk_adjusted', 
-                           reward_config={'w_drawdown': 0.2})
-            
-        Multi-objective:
-            env = TradingEnv(df, reward_type='multi',
-                           reward_config={'w_returns': 1.0, 'w_drawdown': 0.15})
-            
-        ESG multi-objective (for TFM):
-            env = TradingEnv(df, reward_type='esg',
-                           reward_config={'alpha': 0.7, 'secondary_metric': 'esg_score'})
-        
-        Args:
-            df: DataFrame with OHLCV data and technical indicators
-            initial_cash: Starting portfolio cash
-            window_size: Historical window size for observations
-            mode: 'train' (fast, batch indicators) or 'test' (slow, incremental)
-            flatten_observations: If True, returns flat numpy array (for SB3)
-            max_short_positions: Maximum number of short positions allowed
-            normalization_window: Window for rolling feature normalization
-            episode_length: Fixed number of days per episode (None = variable length)
-            reward_type: Type of reward function ('simple', 'multi', 'esg', etc.)
-            reward_config: Additional configuration for reward function
-        """
         self.initial_cash = float(initial_cash)
         self.input_df = df
         self.window_size = window_size
         self.flatten_observations = flatten_observations
-        self.mode = mode.lower()  # Normalize to lowercase
-        self.normalization_window = normalization_window
-        self.episode_length = episode_length
 
-        self.max_short_positions = max_short_positions
-        
-        # Initialize reward calculator
-        reward_config = reward_config or {}
-        self.reward_calculator = RewardFactory.create(reward_type, **reward_config)
-        logger.info(f"Reward function: {reward_type} with config {reward_config}")
-        
-        # Initialize buffers for cumulative returns tracking
-        from collections import deque
-        self.returns_5d = deque(maxlen=5)   # Last 5 days returns
-        self.returns_10d = deque(maxlen=10) # Last 10 days returns
-        self.returns_20d = deque(maxlen=20) # Last 20 days returns
-        self.portfolio_values = deque(maxlen=20)  # Track portfolio values for returns calculation
+        # Features
+        self._features = [col for col in df.columns if "feature" in col]
+        self._nb_features = len(self._features)
 
-        # Determine indicator calculation strategy based on mode
-        self.use_incremental_indicators = (self.mode == 'test')
+        # Training or testing mode
+        self.mode = mode
+
+        # Options
+        self._initialize_options_parameters(max_options, n_strikes, n_months, strike_step_pct)
         
-        # Initialize incremental indicator calculator and normalizer
-        if self.use_incremental_indicators:
-            self.indicator_calculator = IncrementalIndicatorCalculator(TECHNICAL_INDICATORS_CONFIG)
-            self.normalizer = RollingNormalizer(window=normalization_window)
-            logger.info("=" * 70)
-            logger.info("🧪 TEST MODE: Step-by-step incremental indicator calculation")
-            logger.info("=" * 70)
-            logger.info("   Use case: Final testing, evaluation, production deployment")
-            logger.info("   Performance: Slower (~100x) but realistic")
-            logger.info("   Look-ahead bias: GUARANTEED NONE (uses only past data)")
-            logger.info("   Streaming: Ready for real-time API data")
-            logger.info("=" * 70)
+        if go_short:
+            logger.info("Short selling of options is ENABLED.")
+            self.action_space = define_action_space_with_sell(self)
         else:
-            # Use pre-calculated indicators from batch processing (MUCH FASTER for training)
-            self._features = [col for col in df.columns if "feature" in col]
-            self._nb_features = len(self._features)
-            logger.info("=" * 70)
-            logger.info("⚡ TRAIN MODE: Pre-calculated batch indicators")
-            logger.info("=" * 70)
-            logger.info("   Use case: Training (PPO, millions of steps)")
-            logger.info("   Performance: FAST (~100x faster than test mode)")
-            logger.info("   Look-ahead bias: None (data.py uses rolling windows)")
-            logger.info("   Note: Switch to mode='test' for final validation")
-            logger.info("=" * 70)
-
-        self.action_space = self.define_action_space()
+            self.action_space = define_action_space(self)
         
         self._initialize_observation_space()
         self.reset()
 
-    def reset(self, seed: Optional[int] = None):
-        """Start a new episode. Initialize the state and prepare incremental indicator calculation.
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
+        """Start a new episode. Initialize the state and generate options for the first date.
 
         Args:
             seed: Random seed for reproducible episodes
+            options: Additional configuration (unused in this example)
 
         Returns:
             tuple: (observation, info) for the initial state
@@ -227,53 +131,18 @@ class TradingEnv(gym.Env):
         # Use default seed if None is provided (e.g., by check_env)
         effective_seed = seed if seed is not None else np.random.randint(0, 1_000_000)
         print(f"Resetting environment with seed {effective_seed}")
+        # if self.mode == 'train':
+        #     self.df = load_random_data("data/train_data.csv", seed=effective_seed)
+        # elif self.mode == 'test':
+        #     self.df = load_random_data("data/test_data.csv", seed=effective_seed)
+        # else:
+        #     raise ValueError("mode must be 'train' or 'test'")
         
         self.df = self._get_random_df(effective_seed)
         
-        # Reset reward calculator
-        self.reward_calculator.reset()
-        
-        # Reset return tracking buffers
-        self.returns_5d.clear()
-        self.returns_10d.clear()
-        self.returns_20d.clear()
-        self.portfolio_values.clear()
-        
-        # Reset incremental indicator calculator and normalizer
-        if self.use_incremental_indicators:
-            self.indicator_calculator.reset()
-            self.normalizer.reset()
-            
-            # Warm up the indicator calculator with historical data
-            # This ensures indicators are properly initialized before trading starts
-            warmup_steps = min(
-                self.indicator_calculator.get_required_warmup_steps(),
-                len(self.df) - 100  # Leave at least 100 steps for trading
-            )
-            
-            logger.info(f"Warming up indicator calculator with {warmup_steps} historical data points")
-            
-            for i in range(warmup_steps):
-                row = self.df[i]
-                ohlcv = {
-                    'open': float(row['open'][0]),
-                    'high': float(row['high'][0]),
-                    'low': float(row['low'][0]),
-                    'close': float(row['close'][0]),
-                    'volume': float(row['volume'][0]) if 'volume' in row.columns else 0.0
-                }
-                # Update calculator without using the indicators yet
-                _ = self.indicator_calculator.update(ohlcv)
-            
-            # Start trading after warmup
-            self.warmup_offset = warmup_steps
-            logger.info(f"Warmup complete. Trading starts at index {self.warmup_offset}")
-        else:
-            self.warmup_offset = 0
-        
         self.state = self._initialize_state()
-        self.state.current_date = self.df[self.state.current_step + self.warmup_offset, "date"]
-        self.state.current_price = self.df[self.state.current_step + self.warmup_offset, "close"]
+        self.state.current_date = self.df[self.state.current_step, "date"]
+        self.state.current_price = self.df[self.state.current_step, "close"]
         
         # ---Checks added for debugging---
         assert self.state.portfolio.cash == self.initial_cash, "Initial cash mismatch after reset."
@@ -281,106 +150,61 @@ class TradingEnv(gym.Env):
         logger.debug(f"Reset: State initialized. Cash: {self.state.portfolio.cash}, Portfolio Value: {self.state.portfolio.portfolio_value}")
         # --- End of check ---
 
+        # Get list of available options for the current date
+        self.state.options_available = self.update_options()
         observation = self._get_obs()
-        logger.info(f"Initial observation shape: {observation.shape if isinstance(observation, np.ndarray) else 'dict'}")
+        logger.info(f"Initial observation: {observation}")
         info = self._get_info()
+        logger.info(f"Initial info: {info}")
         return observation, info
-
-    def define_action_space(self):
-        """
-        Define a simple action space (buy/sell/hold) for stocks
-        """
-        return spaces.Discrete(3)  # 0=Hold, 1=Buy, 2=Sell
 
     def _get_random_df(self, seed):
         """
-        Get a random subset from the input_df based on the seed.
-        
-        Strategy:
-        1. Select a random company from available tickers
-        2. If episode_length is set, ensure we have enough data for fixed-length episode
-        3. Select random start date with enough remaining data
-        
-        This ensures:
-        - Consistent episode lengths for fair algorithm comparison
-        - Balanced use of historical data
-        - Reproducible experiments with same seed
-        
-        Returns:
-            pl.DataFrame: Filtered dataframe for the episode
+        Get a random subset from the input_df based on the seed. Generates a random company code and initial date.
         """
         df = self.input_df
         
-        # Step 1: Select random company
         company_codes = df["company_code"].unique().to_list()
         random_company_code = company_codes[seed % len(company_codes)]
         df = df.filter(pl.col("company_code") == random_company_code)
-        logger.info(f"Selected company: {random_company_code}")
 
-        # Step 2: Select random start date
+        # Selects random initial date within the selected company code data
         dates = df["date"].unique().sort().to_list()
+        # Ensure we have enough dates and don't go out of bounds
+        # Reserve at least 1000 rows for the environment to work with
+        min_required_rows = 1000
+        max_start_index = max(0, len(dates) - min_required_rows) if len(dates) > min_required_rows else 0
         
-        if self.episode_length is not None:
-            # Fixed-length episodes: ensure we have enough data
-            min_required_rows = self.episode_length + 100  # +100 for warmup
-            
-            if len(dates) < min_required_rows:
-                logger.warning(
-                    f"Company {random_company_code} has only {len(dates)} days, "
-                    f"but episode_length={self.episode_length} requires {min_required_rows}. "
-                    f"Using all available data."
-                )
-                random_initial_date = dates[0]
-            else:
-                # Select start date such that we have episode_length days ahead
-                max_start_index = len(dates) - min_required_rows
-                start_index = seed % max(1, max_start_index)
-                random_initial_date = dates[start_index]
-                
-                logger.info(
-                    f"Fixed episode: {self.episode_length} days starting from "
-                    f"{random_initial_date} (index {start_index}/{len(dates)})"
-                )
+        if max_start_index <= 0:
+            # If we don't have enough dates, just use the first date to get maximum data
+            random_initial_date = dates[0]
         else:
-            # Variable-length episodes (legacy mode)
-            # Reserve at least 1000 rows for the environment
-            min_required_rows = 1000
-            max_start_index = max(0, len(dates) - min_required_rows) if len(dates) > min_required_rows else 0
-            
-            if max_start_index <= 0:
-                random_initial_date = dates[0]
-            else:
-                random_initial_date = dates[seed % max(1, max_start_index)]
-            
-            logger.info(f"Variable episode: starting from {random_initial_date}")
+            random_initial_date = dates[seed % max(1, max_start_index)]
         
-        # Filter data from start date onwards
         df = df.filter(pl.col("date") >= random_initial_date)
         df = df.sort("date")
-        
-        logger.info(f"DataFrame after filtering: {len(df)} rows available")
-        
+        logger.info(f"Selected initial date: {random_initial_date}")
+        logger.info(f"DataFrame after date filter has {len(df)} rows")
+
         return df
 
     def render(self):
         pass
 
     def step(self, action):
-        """Take a step in the environment with incremental indicator calculation.
+        """Take a step in the environment.
 
-        Steps:
-        - Save previous state for reward calculation
-        - Perform the action (buy/sell/hold)
-        - Update the state (current step, date, price)
-        - Update indicators with current OHLCV data (no look-ahead bias)
-        - Update portfolio value
-        - Calculate reward using configured reward function
-        - Check termination conditions (fixed episode length, portfolio=0, data end)
-        - Get normalized observation
-        - Return info
+        steps:
+        - perform the action (buy/sell/hold options)
+        - get reward
+        - update the state (current step, date, price, available options)
+        - update porfolio value
+        - log/history
+        - get observation
+        - get info
 
         Args:
-            action: The action to take (0=hold, 1=buy, 2=sell)
+            action: The action to take (e.g., buy/sell/hold for each option)
         Returns:
             tuple: (observation, reward, terminated, truncated, info)
         """
@@ -395,135 +219,127 @@ class TradingEnv(gym.Env):
         logger.debug(f"Step {self.state.current_step}: Action received: {action}")
         # --- End of check ---
 
-        # Save previous state for reward calculation
-        previous_state = self.state
-        
         self.perform_action(action)
 
         self.state.current_step += 1
         logger.info(f"Current step: {self.state.current_step}")
 
-        # Calculate actual dataframe index (accounting for warmup offset)
-        df_index = self.state.current_step + self.warmup_offset
-        
-        # Check termination conditions
-        
-        # 1. Fixed episode length reached
-        if self.episode_length is not None and self.state.current_step >= self.episode_length:
-            truncated = True
-            logger.info(
-                f"Fixed episode length ({self.episode_length}) reached. "
-                f"Portfolio value: {self.state.portfolio.portfolio_value:.2f}"
-            )
-            # Still update state with last available data
-            df_index = min(df_index, len(self.df) - 1)
-            self.state.current_date = self.df[df_index, "date"]
-            self.state.current_price = self.df[df_index, "close"]
-        
-        # 2. Reached end of available data
-        elif df_index >= len(self.df) - 1:
-            truncated = True
-            logger.info(
-                f"Reached end of data. Portfolio value: {self.state.portfolio.portfolio_value:.2f}"
-            )
-            # Still update state with last available data
-            df_index = len(self.df) - 1
-            self.state.current_date = self.df[df_index, "date"]
-            self.state.current_price = self.df[df_index, "close"]
-        else:
-            # Normal step: update with next data point
-            self.state.current_date = self.df[df_index, "date"]
-            self.state.current_price = self.df[df_index, "close"]
-            
-            # Update incremental indicators with new OHLCV data
-            if self.use_incremental_indicators:
-                row = self.df[df_index]
-                ohlcv = {
-                    'open': float(row['open'][0]),
-                    'high': float(row['high'][0]),
-                    'low': float(row['low'][0]),
-                    'close': float(row['close'][0]),
-                    'volume': float(row['volume'][0]) if 'volume' in row.columns else 0.0
-                }
-                # Update calculator - this uses only data up to current step
-                _ = self.indicator_calculator.update(ohlcv)
+        self.state.current_date = self.df[self.state.current_step, "date"]
+        self.state.current_price = self.df[self.state.current_step, "close"]
 
         self.state.portfolio.portfolio_value = self.get_portfolio_value()
 
+        # Get list of available options for the current date
+        self.state.options_available = self.update_options()
+        
         observation = self._get_obs()
         info = self._get_info()
 
-        # Calculate reward using configured reward function
-        reward = self.reward_calculator.calculate(previous_state, action, self.state)
+        reward = self.get_reward()
 
-        # 3. Portfolio value dropped to zero or below
+        if self.state.current_step >= len(self.df) - 1:
+            truncated = True
+            print(f"Reached the end of the data. Portfolio value: {self.state.portfolio.portfolio_value}")
+
         if self.state.portfolio.portfolio_value <= 0:
-            logger.warning("Portfolio value has dropped to zero or below. Terminating episode.")
+            print("Portfolio value has dropped to zero or below. Terminating episode.")
             terminated = True
             truncated = True
 
-        # print(f"Step {self.state.current_step}: \ncash: {observation['cash']}, portfolio value: {observation['portfolio_value']}, shares: {observation['shares']}, action: {action}, Reward={reward}, Terminated={terminated}, Truncated={truncated}")
         return observation, reward, terminated, truncated, info
 
-    def perform_action(self, action):
-        """ Perform the given action in the environment. Buy/Sell/Do nothing.
-        
-        actions:
-            - 0: Do nothing
-            - 1: Buy
-            - 2: Sell
+    def perform_action(self, actions):
+        """ Perform the given action in the environment. Buy/Sell/Do nothing with options.
+        ACtion could be a discrete list with len of available options, 0 to do nothing, 1 to buy n option and -1 to sell n option.
+
+        The `actions` parameter is an array where elements are partitioned:
+        - First `self.n_options` elements: Actions for options available in the market (0=No-op, 1=Buy).
+        - Next `self.max_options` elements: Actions for options currently held in the portfolio (0=No-op, 1=Sell).
+
         """
-        logger.info(f"Action received: {action}")
-        if action == 1:  # BUY
-            price = self.state.current_price
-            # case 1: close short position
-            if self.state.portfolio.shares < 0:
-                # only if agent has cash
-                if self.state.portfolio.cash >= price:
-                    self.state.portfolio.shares += 1
-                    self.state.portfolio.cash -= price
-                    logger.info(f"Closing short: buying at {price}. Shares now = {self.state.portfolio.shares}")
+        # logger.info(f"Actions received: {actions}")
+        assert len(actions) == self.n_options + self.max_options, f"Action length {len(actions)} does not match expected {self.n_options + self.max_options}"
+        self._perform_for_available_options(actions[:self.n_options]) # Give actions for available options (first n_options elements)
+        self._perform_for_owned_options(actions[-self.max_options:]) # Give actions for owned options (last max_options elements)
 
-            # case 2: long or neutral position
+    def _perform_for_available_options(self, actions):
+        """ Perform actions related to available options (buy or do nothing).
+            Actions for available options are in the first self.n_options elements of the actions array.
+
+            If action is 1, will instantiate the option. If no option in that index, just skip
+        """
+        # logger.info(f"Performing actions: {actions}")
+        for i, action in enumerate(actions):
+            # logger.info(f"action[{i}] = {action}")
+            if action == 0:
+                # Do nothing
+                pass
+            elif action == 1:
+                # Case of buying an available option (go long)
+                logger.info("Buying option (long position)")
+                try:
+                    # Check if there is an available option at index i
+                    option = self.state.options_available[i]
+                    if isinstance(option, Option):
+                        # Check if option isinstance(Option)
+                        self.state.portfolio.buy_option(option)
+                        # Update the portfolio and state
+                except IndexError:
+                    logger.info(f"No available option at index {i}, cannot buy.")
+                pass
+            elif action == 2:
+                # Case of selling an available option (go short)
+                logger.info("selling option (short position)")
+                try:
+                    # Check if there is an available option at index i
+                    option = self.state.options_available[i]
+                    if isinstance(option, Option):
+                        # Check if option isinstance(Option)
+                        self.state.portfolio.go_short(option)
+                        # self.state.portfolio.buy_option(option)
+                        # Update the portfolio and state
+                except IndexError:
+                    logger.info(f"No available option at index {i}, cannot sell.")
+                pass
             else:
-                if self.state.portfolio.cash >= price:
-                    self.state.portfolio.shares += 1
-                    self.state.portfolio.cash -= price
-                    logger.info(f"Buying long at {price}. Shares now = {self.state.portfolio.shares}")
+                # Invalid action
+                logger.info(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (buy), or 2 (sell short).")
+                pass
 
-        elif action == 2:  # SELL
-            price = self.state.current_price
+    def _perform_for_owned_options(self, actions):
+        """ Perform actions related to owned options (sell or do nothing).
+            Actions for owned options are in the last self.max_options elements of the actions array.
 
-            # case 1: agent has long shares, sell one
-            if self.state.portfolio.shares > 0:
-                self.state.portfolio.shares -= 1
-                self.state.portfolio.cash += price
-                logger.info(f"Closing long: selling at {price}. Shares now = {self.state.portfolio.shares}")
-
-            # case 2: no shares, open a short
-            elif self.state.portfolio.shares == 0:
-                if self.state.portfolio.shares - 1 >= -self.max_short_positions:
-                    self.state.portfolio.shares -= 1
-                    self.state.portfolio.cash += price
-                    logger.info(f"Opening short: selling at {price}. Shares now = {self.state.portfolio.shares}")
-
-            # case 3: already short, increase the short until max_short_positions
+            If action is 1, will instantiate the option. If no option in that index, just skip
+        """
+        # logger.info(f"Performing actions: {actions}")
+        for i, action in enumerate(actions):
+            # logger.info(f"action[{i}] = {action}")
+            if action == 0:
+                # Do nothing
+                pass
+            elif action == 1:
+                # Case of selling an available option
+                logger.info("selling option")
+                try:
+                    # Check if there is an available option at index i
+                    # option = self.state.portfolio.owned_options[i]
+                    if isinstance(self.state.portfolio.owned_options[i], Option):
+                        # Sell the option
+                        self.state.portfolio.close_option(i, self.state.current_date)
+                        # Update the portfolio and state
+                except IndexError:
+                    logger.info(f"No available option at index {i}, cannot sell.")
+                pass
             else:
-                if self.state.portfolio.shares - 1 >= -self.max_short_positions:
-                    self.state.portfolio.shares -= 1
-                    self.state.portfolio.cash += price
-                    logger.info(f"Adding to short: selling at {price}. Shares now = {self.state.portfolio.shares}")
-        else:
-            logger.info("Holding position: no action taken.")
-
+                # Invalid action
+                logger.warninginfo(f"Invalid action {action} at index {i}. Action must be 0 (hold), 1 (sell).")
+                pass
+        
+    
     def get_reward(self):
-        """
-        DEPRECATED: Legacy reward method. Use reward_calculator instead.
-        
-        This method is kept for backward compatibility but is not used
-        when reward_calculator is configured (which is always in current version).
-        
-        Returns: float : The reward for the current step
+        """ Calculate the reward for the current step
+        returns: float : The reward for the current step
         """
         reward = self.state.portfolio.value_diff
         # --- check Reward ---
@@ -538,7 +354,84 @@ class TradingEnv(gym.Env):
         Is used to update the state.portfolio.portfolio_value attribute inside the portfolio object, which is part of the state.
         This happens every step, and also checks if options are expired. If so, sells them and removes them from the list
         """
-        return self.state.portfolio.get_current_total_value(self.state.current_price)
+        return self.state.portfolio.get_current_total_value(self.state.current_price, self.state.current_date)
+
+    def update_options(self) -> list[Option]:
+        """ Update the available options based on the current date and price. 
+        
+        1. Generate options for the current date (calls and puts)
+        2. Add them to the existing options list
+        3. Remove expired options
+        4. Keep only unique options (by type, strike, expiry date)
+        5. Sort options by date generated (newest first)
+        6. Select the top N options to be available. Not more than self.max_options can be in that list.
+
+        Currently, this list is not always full.
+
+        Returns:
+            list[Option]: A list of available options for the current date.
+        """
+
+        # Option implementation
+        options_call = gen_option_for_date(
+                                        current_date=self.state.current_date,
+                                        option_type='call',
+                                        spot_price=self.state.current_price,
+                                        num_strikes=self.n_strikes,
+                                        strike_step_pct=self.strike_step_pct,  
+                                        n_months=self.n_months
+                                    )
+        options_put = gen_option_for_date(
+                                        current_date=self.state.current_date,
+                                        option_type='put',
+                                        spot_price=self.state.current_price,
+                                        num_strikes=self.n_strikes,
+                                        strike_step_pct=self.strike_step_pct,  
+                                        n_months=self.n_months
+                                    )
+
+        self.options = self.options + options_call + options_put
+        self.options = sorted(self.options, key=lambda opt: opt.date_generated, reverse=True)
+        self.options = [opt for opt in self.options if opt.expiry_date >= self.state.current_date and opt.premium > 0]
+
+        seen = set()
+        unique_options = []
+        for opt in self.options:
+            key = (opt.option_type, opt.strike, opt.expiry_date)
+            if key not in seen:
+                unique_options.append(opt)
+                seen.add(key)
+
+        # self.state.options_available = unique_options[:self.n_options]
+        options_available = unique_options[:self.n_options]
+        logger.info(f"Current step: {self.state.current_step}")
+        logger.info(f"Current date: {self.state.current_date}")
+        logger.info(f"Number of generated options: {len(self.options)}")
+        logger.info(f"Numero de opciones disponibles unicas: {len(self.state.options_available)}")
+        assert len(options_available) <= self.n_options, "More available options than n_options limit!"
+        return options_available
+    
+    def update_history(self):
+        pass
+
+    def _initialize_options_parameters(self, max_options, n_strikes, n_months, strike_step_pct):
+        """ 
+        Initialize the parameters related to options trading.
+        - max_options : int : max options you can own at once
+        - n_strikes : int : number of strikes above and below the spot price
+        - n_months : int : number of months to consider for options
+        - strike_step_pct : float : step percentage for strikes
+        - n_options : int : Number of available options. 2 for call and put options
+        """
+
+        self.options = []
+        self.max_options = max_options  # max options you can own at once
+        self.owned_options = [] 
+        self.n_owned_options = len(self.owned_options)  # number of owned options
+        self.n_strikes = n_strikes  # number of strikes above and below the spot price
+        self.n_months = n_months
+        self.strike_step_pct = strike_step_pct  # step percentage for strikes
+        self.n_options = (self.n_strikes * 2 + 1) * self.n_months * 2  # Number of available options. 2 for call and put options
  
     def _initialize_state(self) -> State:
         """ Initialize the state of the environment using the dataclass.
@@ -550,13 +443,15 @@ class TradingEnv(gym.Env):
          - current_price: float : The current price of the stock.
          - cash: float : The current cash available.
          - portfolio_value: float : The current total value of the portfolio.
+         - owned_options: list : The list of currently owned options.
+         - options_available: list : The list of currently available options.
          - history: History : The history of the episode.
 
         returns:
             state: The initialized state object.
         """
         # state = initialize_state(current_step = self.window_size, initial_cash = self.initial_cash)
-        state = initialize_state(current_step = self.window_size, initial_cash = self.initial_cash)
+        state = initialize_state(current_step = self.window_size, initial_cash = self.initial_cash, max_options = self.max_options)
         assert state.current_step == self.window_size, "Initial step mismatch."
         assert state.portfolio.cash == self.initial_cash, "Initial cash mismatch."
         assert state.portfolio.portfolio_value == self.initial_cash, "Initial portfolio value mismatch."
@@ -565,181 +460,130 @@ class TradingEnv(gym.Env):
 
     def _get_obs(self):
         """"
-        Get observation with technical indicators calculated incrementally (no look-ahead bias).
-        
-        The observation contains:
-        
-        Portfolio State (5 features):
-            - cash: Available cash
-            - portfolio_value: Total portfolio value
-            - shares: Number of shares held (can be negative for short positions)
-            - value_diff: Change in portfolio value since last step
-            - total_value_diff: Total change since episode start
-            
-        Technical Indicators (8 features - calculated incrementally):
-            - ma_short: Short-term moving average ratio (MA/close)
-            - ma_medium: Medium-term moving average ratio (MA/close)
-            - ma_long: Long-term moving average ratio (MA/close)
-            - rsi: Relative Strength Index (scaled 0-1)
-            - roc: Rate of Change (scaled percentage)
-            - volatility: Historical volatility (rolling std of returns)
-            - atr: Average True Range (normalized by close)
-            - bb_width: Bollinger Bands width (market volatility indicator)
-            
-        Cumulative Returns (3 features):
-            - cum_return_5d: Cumulative return over last 5 days
-            - cum_return_10d: Cumulative return over last 10 days
-            - cum_return_20d: Cumulative return over last 20 days
-            
-        Price Extremes (6 features):
-            - max_5d, min_5d: Max/min portfolio value in last 5 days
-            - max_10d, min_10d: Max/min portfolio value in last 10 days
-            - max_20d, min_20d: Max/min portfolio value in last 20 days
-            
-        Total observation shape: 5 + 8 + 3 + 6 = 22 features
-        
-        All features are normalized using rolling statistics to avoid look-ahead bias.
+        The observation is a subset from the state with the information from:
+        - Current cash
+        - Current portfolio value
+        - features from current date
+        - N last closes (N = window_size)
+        - options available: for each option (self.n_options), 4 features: type (call/put), strike, premium, days_to_expiry
+        - owned options: for each option, 4 features: type (call/put), strike, premium, days_to_expiry
 
-        Returns: dict or flattened array: The normalized observation data.
+        Shape expected: (75,) with this configuration.
+            2 (Cash, portfolio_value)
+            5 (open, high, low, close, volume) 
+            10 (last_closes) + 10 (last_volumes)         (window_size=10) 
+            40 (10 options * 4 features)                 (self.n_options=10)
+            8 (2 owned options * 4 features)             (self.max_options=2)
+                = 75
+
+            Dynamically, the shape is:
+                2 + 5 + 2*window_size  + (self.n_options * 4) + (self.max_options * 4)   
+                2 + 5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
+                
+            Returns: dict: The observation dictionary.
         """""
+        N = self.window_size  # window size for last closes
+        M = self.n_options # available options
+        K = self.max_options # max possible owned options
+   
+        # Expected shape: 5 + 2*window_size  + 4*(self.n_options  + self.max_options)   
+        expected_shape = 4 + 5 + 2*N + 4*(M + K)
+        logger.info(f"Expected observation shape: {expected_shape}")
+
+        # --- 0. Current state for cash and portfolio value ---
+        portfolio = {
+            "cash": float(self.state.portfolio.cash),
+            "portfolio_value": float(self.state.portfolio.portfolio_value),
+            "value_diff": float(self.state.portfolio.value_diff),
+            "total_value_diff": float(self.state.portfolio.total_value_diff)
+        }
+
+        # --- 1. Current state for today ---
+        row = self.df[self.state.current_step]
+        today = {
+            "open": float(row["open"][0]),
+            "close": float(row["close"][0]),
+            "low": float(row["low"][0]),
+            "high": float(row["high"][0]),
+            "volume": float(row["volume"][0])
+        }
+
+        # --- 2. Last N closes ---
+        start = max(0, self.state.current_step - N + 1)
         
-        if self.use_incremental_indicators:
-            # Get current raw indicators from incremental calculator
-            # These are already calculated using only data up to current step
-            df_index = self.state.current_step + self.warmup_offset
-            row = self.df[min(df_index, len(self.df) - 1)]
-            current_close = float(row['close'][0])
-            
-            # Get latest indicators from calculator (already using only past data)
-            raw_indicators = self.indicator_calculator.update({
-                'open': float(row['open'][0]),
-                'high': float(row['high'][0]),
-                'low': float(row['low'][0]),
-                'close': current_close,
-                'volume': float(row['volume'][0]) if 'volume' in row.columns else 0.0
-            })
-            
-            # Create normalized features
-            features = create_normalized_features(raw_indicators, current_close)
-            
-            # Apply rolling normalization (no look-ahead bias)
-            normalized_features = self.normalizer.normalize(features)
-            
-            # Build observation from normalized features
-            technical_indicators = {
-                "ma_short": normalized_features.get("feature_ma_short", 0.0),
-                "ma_medium": normalized_features.get("feature_ma_medium", 0.0),
-                "ma_long": normalized_features.get("feature_ma_long", 0.0),
-                "rsi": normalized_features.get("feature_rsi", 0.0),
-                "roc": normalized_features.get("feature_roc", 0.0),
-                "volatility": normalized_features.get("feature_volatility", 0.0),
-                "atr": normalized_features.get("feature_atr", 0.0),
-                "bb_width": normalized_features.get("feature_bb_width", 0.0)
-            }
-        else:
-            # Fallback: use pre-calculated indicators from DataFrame
-            # WARNING: This may have look-ahead bias if calculated in batch
-            df_index = self.state.current_step + self.warmup_offset
-            row = self.df[min(df_index, len(self.df) - 1)]
-            technical_indicators = {
-                "ma_short": float(row["feature_ma_short"][0]),
-                "ma_medium": float(row["feature_ma_medium"][0]),
-                "ma_long": float(row["feature_ma_long"][0]),
-                "rsi": float(row["feature_rsi"][0]),
-                "roc": float(row["feature_roc"][0]),
-                "volatility": float(row["feature_volatility"][0]),
-                "atr": float(row["feature_atr"][0]),
-                "bb_width": float(row["feature_bb_width"][0])
-            }
+        closes = self.df[start:self.state.current_step + 1, "close"].to_numpy().flatten()
+        closes = np.pad(closes, (N - len(closes), 0), 'constant', constant_values=0)
+        assert closes.shape == (N,), f"last_closes shape mismatch: {closes.shape} vs {(N,)}"
         
-        # Calculate cumulative returns and extremes
-        current_value = self.state.portfolio.portfolio_value
+        # Last N volumes
+        volumes = self.df[start:self.state.current_step + 1, "volume"].to_numpy().flatten()
+        volumes = np.pad(closes, (N - len(closes), 0), 'constant', constant_values=0)
+        assert volumes.shape == (N,), f"last_volumes shape mismatch: {volumes.shape} vs {(N,)}"
         
-        # Update portfolio value history
-        self.portfolio_values.append(current_value)
-        
-        # Calculate cumulative returns for different windows
-        def calc_cumulative_return(window_size):
-            """Calculate cumulative return over last N days"""
-            if len(self.portfolio_values) < 2:
-                return 0.0
-            
-            # Get values for the window
-            values = list(self.portfolio_values)
-            if len(values) <= window_size:
-                # Not enough history, use all available
-                start_value = values[0]
-                end_value = values[-1]
+        # --- 3. Available options ---
+        options_list = self.state.options_available  # Now a list of Option objects
+        type_map = {"call": 0, "put": 1}
+        available_options = []
+        for i in range(M):
+            if i < len(options_list):
+                opt = options_list[i]
+                available_options.append([
+                    type_map.get(opt.option_type, -1),
+                    opt.strike,
+                    opt.premium,
+                    opt.days_to_expire
+                ])
             else:
-                # Use last N values
-                start_value = values[-(window_size)]
-                end_value = values[-1]
-            
-            if start_value == 0:
-                return 0.0
-            
-            return (end_value - start_value) / start_value
-        
-        def calc_extremes(window_size):
-            """Calculate max and min values over last N days"""
-            if len(self.portfolio_values) == 0:
-                return 0.0, 0.0
-            
-            values = list(self.portfolio_values)
-            if len(values) <= window_size:
-                # Use all available
-                window_values = values
+                available_options.append([0, 0.0, 0.0, 0.0])
+        available_options = np.array(available_options, dtype=np.float32)
+        assert available_options.shape == (M, 4), f"available_options shape mismatch: {available_options.shape} vs {(M, 4)}"
+
+        # --- 4. Owned options ---
+        owned_options = []
+        for i in range(K):
+            # if i < len(self.state.portfolio.owned_options):
+            if self.state.portfolio.owned_options[i] is not None:
+                opt = self.state.portfolio.owned_options[i]
+                owned_options.append([
+                    type_map.get(opt.option_type, -1),
+                    opt.strike,
+                    opt.premium,
+                    opt.days_to_expire
+                ])
             else:
-                # Use last N values
-                window_values = values[-window_size:]
-            
-            return max(window_values), min(window_values)
-        
-        # Calculate features
-        cum_return_5d = calc_cumulative_return(5)
-        cum_return_10d = calc_cumulative_return(10)
-        cum_return_20d = calc_cumulative_return(20)
-        
-        max_5d, min_5d = calc_extremes(5)
-        max_10d, min_10d = calc_extremes(10)
-        max_20d, min_20d = calc_extremes(20)
-        
+                owned_options.append([0, 0.0, 0.0, 0.0])
+        owned_options = np.array(owned_options, dtype=np.float32)
+        assert owned_options.shape == (K, 4), f"owned_options shape mismatch: {owned_options.shape} vs {(K, 4)}"
+
+        # obs = {
+        #     "portfolio": portfolio,
+        #     "today": today,
+        #     "last_closes": closes,
+        #     "last_volumes": volumes,
+        #     "available_options": available_options,
+        #     "owned_options": owned_options
+        # }
         obs = {
-            # Portfolio state (not normalized - these are absolute values the agent needs)
             "cash": np.array([self.state.portfolio.cash], dtype=np.float32),
             "portfolio_value": np.array([self.state.portfolio.portfolio_value], dtype=np.float32),
-            "shares": np.array([self.state.portfolio.shares], dtype=np.int32),
             "value_diff": np.array([self.state.portfolio.value_diff], dtype=np.float32),
             "total_value_diff": np.array([self.state.portfolio.total_value_diff], dtype=np.float32),
 
-            # Technical indicators (normalized with rolling statistics)
-            "ma_short": np.array([technical_indicators["ma_short"]], dtype=np.float32),
-            "ma_medium": np.array([technical_indicators["ma_medium"]], dtype=np.float32),
-            "ma_long": np.array([technical_indicators["ma_long"]], dtype=np.float32),
-            "rsi": np.array([technical_indicators["rsi"]], dtype=np.float32),
-            "roc": np.array([technical_indicators["roc"]], dtype=np.float32),
-            "volatility": np.array([technical_indicators["volatility"]], dtype=np.float32),
-            "atr": np.array([technical_indicators["atr"]], dtype=np.float32),
-            "bb_width": np.array([technical_indicators["bb_width"]], dtype=np.float32),
-            
-            # Cumulative returns
-            "cum_return_5d": np.array([cum_return_5d], dtype=np.float32),
-            "cum_return_10d": np.array([cum_return_10d], dtype=np.float32),
-            "cum_return_20d": np.array([cum_return_20d], dtype=np.float32),
-            
-            # Price extremes
-            "max_5d": np.array([max_5d], dtype=np.float32),
-            "min_5d": np.array([min_5d], dtype=np.float32),
-            "max_10d": np.array([max_10d], dtype=np.float32),
-            "min_10d": np.array([min_10d], dtype=np.float32),
-            "max_20d": np.array([max_20d], dtype=np.float32),
-            "min_20d": np.array([min_20d], dtype=np.float32),
+            "open": np.array([today["open"]], dtype=np.float32),
+            "close": np.array([today["close"]], dtype=np.float32),
+            "low": np.array([today["low"]], dtype=np.float32),
+            "high": np.array([today["high"]], dtype=np.float32),
+            "volume": np.array([today["volume"]], dtype=np.float32),
+
+            "last_closes": closes.astype(np.float32),
+            "last_volumes": volumes.astype(np.float32),
+            "available_options": available_options.astype(np.float32).flatten(),
+            "owned_options": owned_options.astype(np.float32).flatten(),
         }
 
-        # Verify observation shape (5 portfolio + 8 technical + 3 returns + 6 extremes)
-        expected_shape = 5 + 8 + 3 + 6
-        flat_size = len(flatten_obs(obs))
-        assert flat_size == expected_shape, f"Observation shape mismatch: got {flat_size}, expected {expected_shape}"
+
+        # Make sure the observation matches the expected shape
+        assert len(flatten_obs(obs)) == expected_shape, f"Observation shape mismatch: got {len(flatten_obs(obs))}, expected {expected_shape}"
         
         # Return flattened observations if requested
         if self.flatten_observations:
@@ -748,62 +592,59 @@ class TradingEnv(gym.Env):
         return obs
     
     def _initialize_observation_space(self):
-        """ 
-        Initialize the observation space using technical indicators (trend + volatility).
-        
-        The observation space includes:
-         - Portfolio state: cash, portfolio_value, shares, value_diff, total_value_diff (5 features)
-         - Technical indicators: MA_short, MA_medium, MA_long, RSI, ROC, Volatility, ATR, BB_Width (8 features)
-         - Cumulative returns: cum_return_5d, cum_return_10d, cum_return_20d (3 features)
-         - Price extremes: max_5d, min_5d, max_10d, min_10d, max_20d, min_20d (6 features)
-         
-         Total: 5 + 8 + 3 + 6 = 22 features
-         """        
-        logger.info(f"Observation space initialized")
+        """ Initialize the observation space based on features and options.
+         The observation space includes:
+         - Portfolio: cash, portfolio_value, value_diff, total_value_diff
+         - The features (self._nb_features): open, high, low, close, volume
+         - Include windows of past closes.
+         - For each option, 4 features: type (call/put), strike, premium, days_to_expiry
+
+         For example:
+         - Portfolio: 4 (cash, portfolio_value, value_diff, total_value_diff)
+         - Features: 5 (open, high, low, close, volume)
+         - last_closes: window_size (e.g., 10)
+         - last_volumes: window_size (e.g., 10)
+         - Options: n_options * 4 (e.g., 10 options * 4 features = 40)
+         - Owned options: max_options * 4 (e.g., 2 options * 4 features = 8)
+         - Total: 4 + 5 + 10 + 10 + 40 + 8 = 73
+         """
+        N = self.window_size  # window size for last closes
+        M = self.n_options # available options
+        K = self.max_options # max possible owned options
+
+        logger.info(f"Observation space initialized with N={N}, M={M} (n_options), K={K} (max_options)")
         
         if self.flatten_observations:
             # Calculate total flattened size
-            total_size = 5 + 8 + 3 + 6  # portfolio + indicators + returns + extremes
+            total_size = 4 + 5 + 2*N + 4*(M + K)
             self.observation_space = Box(low=-np.inf, high=np.inf, shape=(total_size,), dtype=np.float32)
             logger.info(f"Using flattened observation space with shape: {total_size}")
         else:
             self.observation_space = Dict({
-                # Portfolio state
+                # Portfolio
                 "cash": Box(low=0, high=np.inf, shape=(1, ), dtype=np.float32),
                 "portfolio_value": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
-                "shares": Box(low=-self.max_short_positions, high=np.inf, shape=(1, ), dtype=np.int32),
                 "value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
                 "total_value_diff": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),
 
-                # Technical indicators (trend indicators)
-                "ma_short": Box(0.0, 2.0, shape=(1, ), dtype=np.float32),  # Short MA/close ratio
-                "ma_medium": Box(0.0, 2.0, shape=(1, ), dtype=np.float32), # Medium MA/close ratio
-                "ma_long": Box(0.0, 2.0, shape=(1, ), dtype=np.float32),   # Long MA/close ratio
-                "rsi": Box(0.0, 1.0, shape=(1, ), dtype=np.float32),       # RSI scaled to 0-1
-                "roc": Box(-1.0, 1.0, shape=(1, ), dtype=np.float32),      # Rate of change scaled
-                
-                # Volatility indicators
-                "volatility": Box(0.0, 1.0, shape=(1, ), dtype=np.float32),  # Historical volatility
-                "atr": Box(0.0, 1.0, shape=(1, ), dtype=np.float32),         # ATR normalized
-                "bb_width": Box(0.0, 1.0, shape=(1, ), dtype=np.float32),    # BB width
-                
-                # Cumulative returns (last N days)
-                "cum_return_5d": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),   # 5-day cumulative return
-                "cum_return_10d": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),  # 10-day cumulative return
-                "cum_return_20d": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),  # 20-day cumulative return
-                
-                # Price extremes (max/min in last N days)
-                "max_5d": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),  # Max value in last 5 days
-                "min_5d": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32),  # Min value in last 5 days
-                "max_10d": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32), # Max value in last 10 days
-                "min_10d": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32), # Min value in last 10 days
-                "max_20d": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32), # Max value in last 20 days
-                "min_20d": Box(low=-np.inf, high=np.inf, shape=(1, ), dtype=np.float32), # Min value in last 20 days
+                # Today
+                "open": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "close": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "low": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "high": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+                "volume": Box(-np.inf, np.inf, shape=(1, ), dtype=np.float32),
+
+                # Time series + options
+                "last_closes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
+                "last_volumes": Box(-np.inf, np.inf, shape=(N,), dtype=np.float32),
+                "available_options": Box(-np.inf, np.inf, shape=(M * 4, ), dtype=np.float32),
+                "owned_options": Box(-np.inf, np.inf, shape=(K * 4, ), dtype=np.float32),
             })
 
         logger.debug(f"Full observation space definition: {self.observation_space}")
 
     def _get_info(self):
+        from dataclasses import asdict
         return asdict(self.state)
 
 
@@ -812,19 +653,24 @@ if __name__ == "__main__":
     df = load_data(csv_path)
 
     logger.info("Initializing environment for basic test...")
-    env = TradingEnv(df, window_size=10)
+    env = TradingEnv(df, window_size=10, n_months=1, go_short=True) # Use a basic reward
 
+    # Check env for SB3 compatibility
+    from stable_baselines3.common.env_checker import check_env
+    # A chuparla el check_env, me obliga a hacer que info sea un dict en lugar de State
+    # Bueno parece que para usar SB3 es necesario, asi que lo hago
     check_env(env, warn=True, skip_render_check=True)
 
     # --- Initial State Check ---
     observation, info = env.reset()
     logger.info("Environment reset. Performing initial state assertions.")
     # Assertions on the very first state after reset
-    expected_flat_obs_shape = 5 + 8  # 5 portfolio + 8 technical indicators
+    expected_flat_obs_shape = 4 + 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
     assert len(flatten_obs(observation)) == expected_flat_obs_shape, f"Initial flattened observation shape mismatch: {len(flatten_obs(observation))} vs {expected_flat_obs_shape}"
-    assert info["current_step"] == env.window_size, f"Initial step should be {env.window_size}, got {info['current_step']}"
-    assert info["portfolio"].cash == env.initial_cash, f"Initial cash should be {env.initial_cash}, got {info['portfolio'].cash}"
-    assert info["portfolio"].portfolio_value == env.initial_cash, f"Initial portfolio value should be {env.initial_cash}, got {info['portfolio'].portfolio_value}"
+    assert info["current_step"] == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
+    assert info["portfolio"].cash == env.initial_cash, f"Initial cash should be {env.initial_cash}, got {info["portfolio"].cash}"
+    assert info["portfolio"].portfolio_value == env.initial_cash, f"Initial portfolio value should be {env.initial_cash}, got {info["portfolio"].portfolio_value}"
+    assert len(info["options_available"]) <= env.n_options, f"Initial reset: Too many available options: {len(info["options_available"])} > {env.n_options}"
     logger.info("Initial state assertions passed.")
     logger.debug(f"Initial observation: {observation}")
     logger.debug(f"Initial info: {info}")
@@ -858,8 +704,9 @@ if __name__ == "__main__":
         # High-level checks for critical external state
         assert info["portfolio"].portfolio_value >= 0, f"Step {info['current_step']}: Portfolio value became negative: {info['portfolio'].portfolio_value}"
         assert info["portfolio"].cash >= 0, f"Step {info['current_step']}: Cash became negative: {info['portfolio'].cash}"
+        assert len(info["options_available"]) <= env.n_options, f"Step {info['current_step']}: Too many available options: {len(info['options_available'])} > {env.n_options}"
         
-        logger.info(f"Step {info["current_step"]}: Reward={reward:.4f}, Portfolio={info["portfolio"].portfolio_value:.2f}, Cash={info["portfolio"].cash:.2f}")
+        logger.info(f"Step {info["current_step"]}: Reward={reward:.4f}, Portfolio={info["portfolio"].portfolio_value:.2f}, Cash={info["portfolio"].cash:.2f}, Available Options={len(info["options_available"])}")
         logger.debug(f"Obs: {observation}") # Use debug for full observation, info
 
         current_test_step += 1

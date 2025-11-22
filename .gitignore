@@ -207,8 +207,6 @@ marimo/_lsp/
 __marimo__/
 
 
-_obsolete
-docs/
 models/
 data/
 results/

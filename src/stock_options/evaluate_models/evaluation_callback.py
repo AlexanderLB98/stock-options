@@ -13,7 +13,7 @@ from stock_options.evaluate_models.evaluation_callback import create_evaluation_
 
 # Create environment and model
 df = load_random_data("data/stock_data_2025_09_10.csv", seed=42)
-env = TradingEnv(df, window_size=10, flatten_observations=True)
+env = TradingEnv(df, window_size=10, n_months=1)
 model = PPO("MultiInputPolicy", env, verbose=1)
 
 # Create evaluation callback with dynamic path
@@ -63,7 +63,7 @@ class EvaluationCallback(BaseCallback):
                  num_eval_runs: int = 10,
                  eval_env_kwargs: dict = None,
                  save_path: str = None,
-                 name: str = "",
+                 model_name_suffix: str = "",
                  flatten_observations: bool = False,
                  csv_path = "data/test_data.csv",
                  verbose: int = 1):
@@ -75,7 +75,7 @@ class EvaluationCallback(BaseCallback):
             num_eval_runs: Number of evaluation episodes to run
             eval_env_kwargs: Kwargs for creating the evaluation environment
             save_path: Directory to save the plots (if None, will be auto-generated)
-            name: Optional suffix to add to the model name for path generation
+            model_name_suffix: Optional suffix to add to the model name for path generation
             verbose: Verbosity level
         """
         super().__init__(verbose)
@@ -83,7 +83,7 @@ class EvaluationCallback(BaseCallback):
         self.num_eval_runs = num_eval_runs
         self.eval_env_kwargs = eval_env_kwargs or {}
         self.base_save_path = save_path  # Store the base path, actual path will be set later
-        self.name = name
+        self.model_name_suffix = model_name_suffix
         self.last_eval_step = 0
         self.save_path = None  # Will be set when model is available
         self.flatten_observations = flatten_observations
@@ -103,8 +103,8 @@ class EvaluationCallback(BaseCallback):
         model_name = self.model.__class__.__name__.lower()
         
         # Add suffix if provided
-        if self.name:
-            model_name = f"{model_name}_{self.name}"
+        if self.model_name_suffix:
+            model_name = f"{model_name}_{self.model_name_suffix}"
         
         # Create the full path
         self.save_path = os.path.join(base_dir, f"evaluations_{model_name}")
@@ -130,6 +130,7 @@ class EvaluationCallback(BaseCallback):
         # Use provided kwargs or defaults
         env_kwargs = {
             'window_size': 10,
+            'n_months': 1,
             'mode': "test",
             'flatten_observations': self.flatten_observations,  # Add flattened observations for RecurrentPPO compatibility
             **self.eval_env_kwargs
@@ -229,7 +230,7 @@ class EvaluationCallback(BaseCallback):
 def create_evaluation_callback(n_eval_steps: int = 10000, 
                               num_eval_runs: int = 10,
                               save_path: str = None,
-                              name: str = "",
+                              model_name_suffix: str = "",
                               csv_path = "data/test_data.csv",
                               **env_kwargs) -> EvaluationCallback:
     """
@@ -239,7 +240,7 @@ def create_evaluation_callback(n_eval_steps: int = 10000,
         n_eval_steps: Number of training steps between evaluations
         num_eval_runs: Number of evaluation episodes to run
         save_path: Base directory to save the plots (if None, uses "results")
-        name: Optional suffix to add to the model name for path generation
+        model_name_suffix: Optional suffix to add to the model name for path generation
         **env_kwargs: Additional kwargs for the evaluation environment
     
     Returns:
@@ -249,13 +250,13 @@ def create_evaluation_callback(n_eval_steps: int = 10000,
         # Creates path: results/evaluations_ppo_short_selling/
         callback = create_evaluation_callback(
             n_eval_steps=10000,
-            name="short_selling"
+            model_name_suffix="short_selling"
         )
         
         # Creates path: my_results/evaluations_dqn_experiment1/
         callback = create_evaluation_callback(
             save_path="my_results",
-            name="experiment1"
+            model_name_suffix="experiment1"
         )
     """
     return EvaluationCallback(
@@ -263,6 +264,6 @@ def create_evaluation_callback(n_eval_steps: int = 10000,
         num_eval_runs=num_eval_runs,
         eval_env_kwargs=env_kwargs,
         save_path=save_path,
-        name=name,
+        model_name_suffix=model_name_suffix,
         csv_path=csv_path
     )

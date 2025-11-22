@@ -25,7 +25,7 @@ if __name__ == "__main__":
     df = load_random_data(csv_path, seed)
 
     logger.info("Initializing environment for basic test...")
-    env = TradingEnv(df, window_size=10, n_months=1, flatten_observations=True) # Use a basic reward
+    env = TradingEnv(df, window_size=10, n_months=1) # Use a basic reward
 
     # Check env for SB3 compatibility
     from stable_baselines3.common.env_checker import check_env
@@ -37,11 +37,12 @@ if __name__ == "__main__":
     observation, info = env.reset()
     logger.info("Environment reset. Performing initial state assertions.")
     # Assertions on the very first state after reset
-    expected_flat_obs_shape = 4 + 5 + 2*env.window_size
+    expected_flat_obs_shape = 4 + 5 + 2*env.window_size + 4*(env.n_options + env.max_options)
     assert len(flatten_obs(observation)) == expected_flat_obs_shape, f"Initial flattened observation shape mismatch: {len(flatten_obs(observation))} vs {expected_flat_obs_shape}"
     assert info["current_step"] == env.window_size, f"Initial step should be {env.window_size}, got {info.current_step}"
     assert info["portfolio"].cash == env.initial_cash, f"Initial cash should be {env.initial_cash}, got {info["portfolio"].cash}"
     assert info["portfolio"].portfolio_value == env.initial_cash, f"Initial portfolio value should be {env.initial_cash}, got {info["portfolio"].portfolio_value}"
+    assert len(info["options_available"]) <= env.n_options, f"Initial reset: Too many available options: {len(info["options_available"])} > {env.n_options}"
     logger.info("Initial state assertions passed.")
     logger.debug(f"Initial observation: {observation}")
     logger.debug(f"Initial info: {info}")
@@ -84,8 +85,9 @@ if __name__ == "__main__":
             # High-level checks for critical external state
             assert info["portfolio"].portfolio_value >= 0, f"Step {info['current_step']}: Portfolio value became negative: {info['portfolio'].portfolio_value}"
             assert info["portfolio"].cash >= 0, f"Step {info['current_step']}: Cash became negative: {info['portfolio'].cash}"
+            assert len(info["options_available"]) <= env.n_options, f"Step {info['current_step']}: Too many available options: {len(info['options_available'])} > {env.n_options}"
             
-            logger.info(f"Step {info["current_step"]}: Reward={reward:.4f}, Portfolio={info["portfolio"].portfolio_value:.2f}, Cash={info["portfolio"].cash:.2f}")
+            logger.info(f"Step {info["current_step"]}: Reward={reward:.4f}, Portfolio={info["portfolio"].portfolio_value:.2f}, Cash={info["portfolio"].cash:.2f}, Available Options={len(info["options_available"])}")
             logger.debug(f"Obs: {observation}") # Use debug for full observation, info
 
             current_test_step += 1

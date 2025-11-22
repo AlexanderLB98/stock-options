@@ -14,9 +14,6 @@ numpy = "*"
 scipy = "^1.16.1"
 tensorboard = "^2.20.0"
 sb3-contrib = "^2.7.0"
-stable-baselines3 = {extras = ["extra"], version = "^2.7.0"}
-tqdm = "^4.67.1"
-rich = "^14.2.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.0" # For testing
