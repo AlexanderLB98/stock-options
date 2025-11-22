@@ -21,7 +21,7 @@ if __name__ == "__main__":
     df = load_data(csv_path)
 
     logger.info("Initializing environment for basic test...")
-    env = TradingEnv(df, window_size=10, n_months=1) # Use a basic reward
+    env = TradingEnv(df, window_size=10, n_months=1, flatten_observations=True) # Use a basic reward
 
     # --- Initial State Check ---
     observation, info = env.reset()
